@@ -12,6 +12,20 @@
 - 今晚跳过（skip.json fail-safe）、手动检测当前是否满足关机条件
 - 明亮/暗黑双主题
 
+## 应用截图
+
+以下截图来自 iPhone SE 尺寸（375×667）高清预览：
+
+| 状态 | 设置 |
+| --- | --- |
+| ![状态页](snapshots/iphone-se-status.jpg) | ![设置页](snapshots/iphone-se-settings.jpg) |
+
+| 日志 | 部署 |
+| --- | --- |
+| ![日志页](snapshots/iphone-se-logs.jpg) | ![部署页](snapshots/iphone-se-deploy.jpg) |
+
+![关于页](snapshots/iphone-se-about.jpg)
+
 ## 环境要求
 
 - Node.js 22、npm
