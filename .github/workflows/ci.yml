@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run download:fnpack
+      - run: npm run pack:fpk
+        env:
+          EXECUTOR_SIGNING_KEY: ${{ secrets.EXECUTOR_SIGNING_KEY }}
+      - name: Upload app.tgz artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnos-app-shutdown-artifacts
+          path: |
+            dist/app.tgz
+            dist/*.fpk
+            .fnos-build/package/manifest
+          if-no-files-found: error

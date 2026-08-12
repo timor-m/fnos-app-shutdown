@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download fnpack
+        run: npm run download:fnpack
+
+      - name: Pack fpk
+        run: npm run pack:fpk
+        env:
+          EXECUTOR_SIGNING_KEY: ${{ secrets.EXECUTOR_SIGNING_KEY }}
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          {
+            echo "# 智能关机 v${VERSION}"
+            echo
+            echo "飞牛 fnOS 原生应用：在设定的夜间工作阶段内，经 CPU、负载、在线用户、SSH、磁盘 IO、网络等空闲检查全部通过后自动关机。"
+            echo
+            echo "## Release Artifacts"
+            echo
+            echo "- \`dist/app.tgz\`: fnOS app payload archive"
+            echo "- \`dist/*.fpk\`: installable fnOS package"
+            echo
+            echo "## Highlights"
+            echo
+            echo "- 工作阶段 + 15 项空闲检查项，逐项开关/阈值可配"
+            echo "- root 执行器与应用经文件系统原子通信（协作契约见 docs/CONTRACT.md）"
+            echo "- 部署向导：执行器一键部署与三态健康检测"
+            echo "- 运行日志按「次」分组展示，支持日期筛选与关键字高亮"
+            echo "- 今晚跳过、手动检测、明亮/暗黑双主题"
+            echo
+            echo "## Notes"
+            echo
+            echo "- Version source: \`package.json\`（与执行器 SCRIPT_VERSION 强制一致，打包校验）"
+            echo "- App config source: \`template.config.json\`"
+          } > RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          name: 智能关机 v${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/app.tgz
+            dist/*.fpk

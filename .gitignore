@@ -1,0 +1,22 @@
+node_modules/
+.server-dist/
+.fnos-build/
+dist/
+.ui-dist/
+.tmp-nitro/
+.npm-cache/
+.DS_Store
+*.log
+coverage/
+npm-debug.log*
+tools/fnpack
+tools/fnpack-*
+tools/fnpack.version
+
+# 本机开发运行数据（dev 模式数据目录回退，含用户配置/状态/日志）
+data/
+# CI Release 生成物
+RELEASE_NOTES.md
+
+# 签名私钥（离线保管，绝不入库；§3.6 签名自更新信任锚）
+keys/

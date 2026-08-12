@@ -1,0 +1,31 @@
+{
+  "appName": "fnos-app-shutdown",
+  "appTitle": "智能关机",
+  "displayName": "智能关机",
+  "appDescription": "在设定的夜间工作阶段（默认 23:00–08:00）内持续检测系统空闲状态，全部检查通过后自动关机，避免 NAS 整夜空转耗电。内置 15 项可独立开关并调整阈值的检查项：CPU 占用、系统负载、在线用户、SSH 会话、磁盘 IO、网络收发速率、最小运行时长、SMB 会话、TCP 会话、下载连接、虚拟机运行、进程守护、磁盘擦洗、指定主机在线和日历规则。应用本身以低权限运行，关机判定由 root 执行器完成，双方经文件系统原子通信、互不越权。提供部署向导（一键部署/升级、三态健康检测）、按「次」分组的运行日志、今晚跳过、手动检测当前是否满足关机条件、明亮/暗黑双主题，以及可选的直连端口访问。",
+  "desktopLaunchName": "fnos-app-shutdown.Application",
+  "gatewayPrefix": "/app/fnos-app-shutdown",
+  "gatewaySocket": "app.sock",
+  "uiAllUsers": true,
+  "servicePort": 8366,
+  "localDevPort": 3333,
+  "runtimeDependency": "nodejs_v22",
+  "osMinVersion": "1.1.3100",
+  "maintainer": "timor-m",
+  "maintainerUrl": "https://github.com/timor-m/fnos-app-shutdown.git",
+  "distributor": "timor-m",
+  "distributorUrl": "https://github.com/timor-m/fnos-app-shutdown.git",
+  "source": "thirdparty",
+  "platform": "all",
+  "runAs": "package",
+  "logLevel": "info",
+  "releaseNotes": {
+    "summary": "智能关机：工作阶段内 15 项空闲检查全部通过后自动关机，低权限应用与 root 执行器经文件系统解耦。",
+    "highlights": [
+      "关机窗口与逐检查项开关/阈值配置",
+      "root 执行器与应用经文件系统原子通信",
+      "部署向导：执行器一键部署与三态健康检测",
+      "运行日志按「次」分组展示与今晚跳过"
+    ]
+  }
+}
