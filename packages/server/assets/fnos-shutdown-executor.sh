@@ -954,9 +954,9 @@ dry_run() {
         printf 'skip: 无\n'
     fi
     if in_window; then
-        printf 'window: 当前在窗口内（%s-%s，左闭右开）\n' "$CFG_WIN_START_STR" "$CFG_WIN_END_STR"
+        printf '工作时段: 当前在工作时段内（%s-%s，左闭右开）\n' "$CFG_WIN_START_STR" "$CFG_WIN_END_STR"
     else
-        printf 'window: 当前不在窗口内（%s-%s，左闭右开）\n' "$CFG_WIN_START_STR" "$CFG_WIN_END_STR"
+        printf '工作时段: 当前不在工作时段内（%s-%s，左闭右开）\n' "$CFG_WIN_START_STR" "$CFG_WIN_END_STR"
     fi
     printf '检查项:\n'
     for c in cpu load users ssh disk_io network min_uptime smb_sessions tcp_sessions download_active vm_running process_running disk_scrub host_online calendar_rules; do
@@ -1087,7 +1087,7 @@ main() {
         exit 0
     fi
     if ! in_window; then
-        log_info "不在窗口内（窗口 $CFG_WIN_START_STR-$CFG_WIN_END_STR），退出"
+        log_info "不在工作时段内（工作时段 $CFG_WIN_START_STR-$CFG_WIN_END_STR），退出"
         write_status out_of_window false
         exit 0
     fi
@@ -1110,7 +1110,7 @@ main() {
             exit 0
         fi
         if ! in_window; then
-            log_info "第 $round 轮：离开窗口，正常结束"
+            log_info "第 $round 轮：离开工作时段，正常结束"
             write_status window_end false
             exit 0
         fi
