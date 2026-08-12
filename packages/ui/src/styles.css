@@ -1590,6 +1590,33 @@ select.input {
   .topbar-inner {
     width: calc(100% - 16px);
     row-gap: 8px;
+    padding-right: 0;
+  }
+
+  .app-title {
+    flex: 1 1 100%;
+    padding-right: 42px;
+  }
+
+  .tabs {
+    width: max-content;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0 auto;
+    gap: 1px;
+    padding: 3px;
+    overflow: hidden;
+  }
+
+  .tab {
+    min-width: 0;
+    gap: 3px;
+    padding: 7px 5px;
+  }
+
+  .tab-label {
+    margin-left: 0;
+    font-size: 12px;
   }
 
   .panel {
