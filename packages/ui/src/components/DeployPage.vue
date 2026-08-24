@@ -156,9 +156,6 @@ onMounted(() => {
       <p v-else-if="status.executor.state === 'undeployed'" class="badge-hint">
         在 NAS 上通过 SSH 执行下方一键命令完成部署；部署后 cron 最迟 10 分钟内首次触发，此处转为「正常」。
       </p>
-      <p class="badge-hint warn">
-        若从低于 v1.0.1 的应用版本升级，请重新执行下方「一键部署 / 升级」命令，写入实际数据目录并为系统 ping 授予 <code>CAP_NET_RAW</code>；仅等待执行器自动更新不能完成需要 sudo 的部署修复。
-      </p>
     </section>
 
     <!-- 部署步骤 -->
