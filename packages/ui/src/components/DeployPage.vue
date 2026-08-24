@@ -19,17 +19,25 @@ const DEPLOY_COMMAND_TEMPLATE = `curl -fsSL "http://127.0.0.1:<直连端口>/app
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
   && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \\
   && APP_GID="$(id -g fnos-app-shutdown)" \\
+  && PING_SOURCE="$(readlink -f "$(command -v ping 2>/dev/null)" 2>/dev/null || true)" \\
+  && SETCAP_BIN="$(command -v setcap || true)" \\
+  && { [ -n "$PING_SOURCE" ] || { echo '未找到 ping 命令' >&2; false; }; } \\
+  && { [ -n "$SETCAP_BIN" ] || { echo '未找到 setcap（请安装 libcap2-bin）' >&2; false; }; } \\
+  && sudo install -d -m 750 -o root -g "$APP_GID" /usr/local/libexec/fnos-shutdown \\
+  && sudo install -m 750 -o root -g "$APP_GID" "$PING_SOURCE" /usr/local/libexec/fnos-shutdown/ping \\
+  && sudo "$SETCAP_BIN" cap_net_raw=ep /usr/local/libexec/fnos-shutdown/ping \\
   && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \\
   && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \\
   && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \\
   && printf 'net.ipv4.ping_group_range = %s\\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \\
   && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \\
-  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo -u fnos-app-shutdown /usr/local/libexec/fnos-shutdown/ping -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo install -m 640 -o root -g "$APP_GID" /dev/null /usr/local/libexec/fnos-shutdown/ready \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
 const VERIFY_COMMAND_TEMPLATE = `DATA_DIR=<数据目录> \\
   && test -d "$DATA_DIR" \\
-  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \\
+  && sudo -u fnos-app-shutdown /usr/local/libexec/fnos-shutdown/ping -c 1 -W 1 127.0.0.1 \\
   && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run`;
 
 const MANUAL_INSTALL_COMMAND_TEMPLATE = `DATA_DIR=<数据目录> \\
@@ -37,16 +45,26 @@ const MANUAL_INSTALL_COMMAND_TEMPLATE = `DATA_DIR=<数据目录> \\
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
   && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \\
   && APP_GID="$(id -g fnos-app-shutdown)" \\
+  && PING_SOURCE="$(readlink -f "$(command -v ping 2>/dev/null)" 2>/dev/null || true)" \\
+  && SETCAP_BIN="$(command -v setcap || true)" \\
+  && { [ -n "$PING_SOURCE" ] || { echo '未找到 ping 命令' >&2; false; }; } \\
+  && { [ -n "$SETCAP_BIN" ] || { echo '未找到 setcap（请安装 libcap2-bin）' >&2; false; }; } \\
+  && sudo install -d -m 750 -o root -g "$APP_GID" /usr/local/libexec/fnos-shutdown \\
+  && sudo install -m 750 -o root -g "$APP_GID" "$PING_SOURCE" /usr/local/libexec/fnos-shutdown/ping \\
+  && sudo "$SETCAP_BIN" cap_net_raw=ep /usr/local/libexec/fnos-shutdown/ping \\
   && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \\
   && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \\
   && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \\
   && printf 'net.ipv4.ping_group_range = %s\\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \\
   && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \\
-  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo -u fnos-app-shutdown /usr/local/libexec/fnos-shutdown/ping -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo install -m 640 -o root -g "$APP_GID" /dev/null /usr/local/libexec/fnos-shutdown/ready \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
 const UNINSTALL_COMMAND = `PING_GID_RANGE="$(sudo cat /var/lib/fnos-shutdown/ping-group-range.original 2>/dev/null || true)" \\
   && sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown /etc/sysctl.d/99-fnos-shutdown-ping.conf \\
+  && sudo rm -f /usr/local/libexec/fnos-shutdown/ping /usr/local/libexec/fnos-shutdown/ready \\
+  && { sudo rmdir /usr/local/libexec/fnos-shutdown 2>/dev/null || true; } \\
   && { [ -z "$PING_GID_RANGE" ] || sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE"; } \\
   && sudo rm -f /var/lib/fnos-shutdown/ping-group-range.original \\
   && { sudo rmdir /var/lib/fnos-shutdown 2>/dev/null || true; }`;
@@ -167,10 +185,10 @@ onMounted(() => {
         在 NAS 上通过 SSH 执行下方一键命令完成部署；部署后 cron 最迟 10 分钟内首次触发，此处转为「正常」。
       </p>
       <p
-        v-if="status.executor.state === 'undeployed' || status.executor.state === 'outdated'"
+        v-if="status.executor.state === 'outdated' || status.executor.state === 'incomplete'"
         class="badge-hint warn"
       >
-        从应用 v1.0.0 或更早版本升级时，请务必重新执行下方「一键部署 / 升级」命令，将当前应用的实际数据目录写入 cron；仅等待执行器自动更新不能修复旧 cron 配置。
+        从应用 v1.0.1 或更早版本升级时，请务必重新执行下方「一键部署 / 升级」命令，写入实际数据目录并安装私有 ping helper；仅等待执行器自动更新不能完成需要 sudo 的部署修复。
       </p>
     </section>
 
@@ -192,7 +210,7 @@ onMounted(() => {
             <p class="field-desc">
               命令会从本应用下载执行器脚本（127.0.0.1 直连端口，免网关注销态）、安装到 <code>/usr/local/sbin/</code> 并写入 cron（每 10 分钟触发一次）。
               cron 会显式携带当前应用数据目录 <code>{{ dataDir || "未检测到" }}</code>，因此应用安装在任意存储卷都能与执行器共享配置和状态。
-              同时仅为应用用户开放 ICMP Echo socket，使「主机在线」可在低权限手动检测中正常使用；不会授予应用 root 或 <code>CAP_NET_RAW</code>。
+              同时安装仅应用用户组可执行的私有 ping helper，并只给该副本授予 <code>CAP_NET_RAW</code>，使 BusyBox/raw-socket 环境中的「主机在线」检测正常工作；不会修改系统共享 <code>ping</code>，也不会授予应用 root。
               首次部署后，应用升级时执行器会自动验签同步新版（§3.6），无需再跑命令。
             </p>
             <p v-if="servicePort === null" class="badge-hint warn">

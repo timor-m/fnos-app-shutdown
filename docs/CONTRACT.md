@@ -1,6 +1,8 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.10 · 2026-08-24（取消所有数据目录猜测；`FNOS_SHUTDOWN_DATA_DIR` 缺失或无效时执行器安全退出）
+> 版本：v0.11 · 2026-08-24（§9 增加应用组隔离的私有 `CAP_NET_RAW` ping helper，兼容 BusyBox/raw-socket ping）
+>
+> 历史：v0.10 · 2026-08-24（取消所有数据目录猜测；`FNOS_SHUTDOWN_DATA_DIR` 缺失或无效时执行器安全退出）
 >
 > 历史：v0.9 · 2026-08-24（§9 从应用运行时读取实际 `STORAGE_DIR` 并显式写入 cron）
 >
@@ -51,6 +53,7 @@
 | `data/skip.json` | **写**（原子）+ 删 | 只读 | — |
 | `data/executor/`（整个目录） | **只读，禁止写入/删除/改名其中任何文件** | **写**（mkdir -p 自建） | — |
 | `/usr/local/sbin/fnos-shutdown-executor.sh` | 不得修改（仅经 HTTP 分发包内副本） | — | 每 10 分钟执行 |
+| `/usr/local/libexec/fnos-shutdown/ping`、`ready` | 执行 ping、读取 ready；不得修改 | root 部署时创建，运行时只执行/读 | — |
 | `/etc/cron.d/fnos-shutdown` | 不得修改 | — | — |
 | `data/` 下应用私有文件（db 等） | 自由 | **禁止触碰** | — |
 
@@ -209,14 +212,15 @@
 | `poweroff` | 条件满足，已发起关机（写完该状态后立即执行 poweroff） |
 
 **写入规则（executor）**：原子写；644 root:root；每次触发至少写一次。
-**应用派生状态**（部署页三态，判定谓词必须按下表实现）：
+**应用派生状态**（部署页五态，按表格自上而下判定）：
 
 | 状态 | 谓词 |
 |---|---|
 | 🔴 未部署 | `status.json` 不存在 |
-| 🟢 正常 | 存在 且 `script_version == 应用包内版本` 且 `now - last_trigger ≤ 20 分钟` |
 | 🟡 版本过旧 | 存在 且 `script_version != 应用包内版本` |
 | 🟠 运行异常 | 存在 且 版本一致 但 `now - last_trigger > 20 分钟`（cron 可能失效） |
+| 🟡 部署不完整 | 存在、版本与心跳正常，但私有 ping helper 不可执行或成功验证标记不可读 |
+| 🟢 正常 | 存在、版本与心跳正常，且私有 ping helper 可执行、成功验证标记可读 |
 
 ### 3.4 `executor/YYYY-MM.log`（executor 写 → 应用读）
 
@@ -231,7 +235,7 @@
 - 包内路径：`app/server/assets/fnos-shutdown-executor.sh`，644，应用用户可读
 - 签名文件：`app/server/assets/fnos-shutdown-executor.sh.sig`，随包分发（RSA-3072/SHA-256，打包时用离线私钥生成；应用用户可写不影响安全，没有私钥无法伪造有效签名）
 - 应用通过 `GET /api/executor/script` 返回该文件**原始字节**（Content-Type: text/plain; charset=utf-8，不得转码/裁剪）
-- **版本同步规则**：脚本内 `SCRIPT_VERSION` 必须与应用 manifest `version` 保持一致（打包时校验）；三态检测（§3.3）依赖这一致性
+- **版本同步规则**：脚本内 `SCRIPT_VERSION` 必须与应用 manifest `version` 保持一致（打包时校验）；部署状态检测（§3.3）依赖这一致性
 - 网关鉴权注意：SSH 中 curl 无登录 cookie。实现时验证网关行为；若强制鉴权导致一键命令失败，则该端点需允许匿名访问（脚本无密钥，风险可接受），否则部署页降级为"复制全文 + 手动保存"（§9 备选）
 ### 3.6 执行器签名自更新（v0.7 新增）
 
@@ -315,12 +319,12 @@ write_status(max_rounds_reached); exit 0
 | vm_running | `virsh list --state-running` 运行中 VM 计数 | = 0 |
 | process_running | `pgrep` 逐一精确匹配 names（进程名，非 -f 全文） | 全部无匹配 |
 | disk_scrub | `/proc/mdstat` 无 resync/recovery/reshape/check 进行中；且每个 btrfs 挂载点 `btrfs scrub status` 无 scrub 运行中（ioctl 读内核态，不唤醒机械盘） | 同时满足 |
-| host_online | `ping -c 1 -W 1` 逐一探测 hosts | 全部不可达 |
+| host_online | 优先用 `/usr/local/libexec/fnos-shutdown/ping` 私有 helper 执行 `ping -c 1 -W 1`；helper 缺失时回退系统 `ping` | 全部不可达 |
 | calendar_rules | 当天 `date +%w` ∉ skip_weekdays 且当天 `date +%m-%d` ∉ skip_dates | 不在任何跳过列表 |
 
 - `enabled=false` 的检查项直接视为通过，不执行任何采样
 - **测量失败视为不通过（fail-safe）**：如 smbstatus 不存在、`/proc/uptime` 不可读等，该检查项按不通过处理并记警告，绝不因测量失败而误关机
-- 历史缺陷对应：禁用 `netstat` 改用 `ss`（原脚本 grep `:22` 永远匹配不到 8975）；网络统计排除 lo/容器网桥（原本机服务互访误判有活动）；executor 文件 `root:root 700`（原脚本可被普通用户改写，属提权路径）
+- 历史缺陷对应：禁用 `netstat` 改用 `ss`（原脚本 grep `:22` 永远匹配不到 8975）；网络统计排除 lo/容器网桥（原本机服务互访误判有活动）；executor 文件 `root:root 700`（原脚本可被普通用户改写，属提权路径）；`host_online` 使用应用组隔离的私有 ping 副本，避免 BusyBox/raw-socket ping 在低权限 dry-run 中返回 rc=2
 
 ### 4.6 预设动作清单（能力封闭集合）
 
@@ -368,7 +372,7 @@ C. 动作类
 
 **C. 关机执行**：全部启用检查通过 → executor 先写 status `poweroff` → `exec /sbin/poweroff`。应用事后从 status.json 读到该状态用于展示（机器已关，无实时反馈）。
 
-**D. 部署/升级**：用户在部署页复制一键命令（§9）→ SSH 粘贴执行（幂等）→ 下一脚 cron（≤10 分钟）写出 status.json → 部署页三态转绿/转黄逻辑见 §3.3。应用升级导致包内 SCRIPT_VERSION 高于 status.json 中的版本 → 显示 🟡 引导重跑同一命令。
+**D. 部署/升级**：用户在部署页复制一键命令（§9）→ SSH 粘贴执行（幂等）→ 私有 ping helper 验证成功并写 ready → 下一脚 cron（≤10 分钟）写出 status.json → 部署页按 §3.3 判定。应用升级导致包内 SCRIPT_VERSION 高于 status.json 中的版本，或 helper/ready 缺失时，均显示 🟡 并引导重跑同一命令。
 
 **E. 应用卸载**：应用与 `data/` 可能被清除 → `FNOS_SHUTDOWN_DATA_DIR` 指向的目录不存在 → executor 安全退出，不创建目录、不使用默认配置、不关机；executor 本体的卸载只能由用户手动执行（§9），应用不得尝试。
 
@@ -403,22 +407,22 @@ C. 动作类
 |---|---|---|
 | GET | `/api/config` | 读 config.json，与默认值合并后返回 |
 | PUT | `/api/config` | 全字段校验（§3.1）→ 原子写 |
-| GET | `/api/status` | 综合 status.json + skip.json + config.json 返回：部署三态、今晚窗口、当前是否监控中、skip 状态 |
+| GET | `/api/status` | 综合 status.json + helper 完整性 + skip.json + config.json 返回：部署五态、今晚窗口、当前是否监控中、skip 状态 |
 | POST | `/api/skip` | 计算窗口结束时刻，原子写 skip.json |
 | DELETE | `/api/skip` | 删除 skip.json |
 | GET | `/api/logs?month=YYYY-MM` | 列举/读取 EXEC_DIR 日志，原文返回，分页 |
 | GET | `/api/executor/script` | 返回包内脚本原始字节（§3.5） |
-| GET | `/api/executor/status` | §3.3 三态/四态判定结果 + status.json 原文 |
+| GET | `/api/executor/status` | §3.3 五态判定结果 + status.json 原文 |
 
 UI 三页：
 
 1. **状态页**：部署徽标、今晚计划、决策日志展示、"今晚跳过"开关
 2. **设置页**：全局区（总开关、窗口、间隔、轮次）+ **检查项区——每项一张卡片：启用开关 + 该项参数表单**（对应 §3.1 checks 结构，带范围校验）
-3. **部署向导页**：三态卡片 + §9 命令的复制按钮 + 备选复制脚本全文
+3. **部署向导页**：五态卡片 + §9 命令的复制按钮 + 备选复制脚本全文
 
 ## 9. 部署命令规约（UI 一字不差展示）
 
-**v1.0.1 起**：本命令除首次部署与手动修复外，还负责把实际数据目录写入 cron。由 v1.0.0 或更早版本升级的设备必须重新执行一次；之后执行器版本仍可经 §3.6 签名自更新。
+**v1.0.2 起**：本命令除首次部署与手动修复外，还负责把实际数据目录写入 cron，并安装私有 ping helper。由 v1.0.1 或更早版本升级的设备必须重新执行一次；之后执行器版本仍可经 §3.6 签名自更新。
 
 一键部署/修复（幂等，可重复执行）：
 
@@ -429,23 +433,31 @@ curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/s
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \
   && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \
   && APP_GID="$(id -g fnos-app-shutdown)" \
+  && PING_SOURCE="$(readlink -f "$(command -v ping 2>/dev/null)" 2>/dev/null || true)" \
+  && SETCAP_BIN="$(command -v setcap || true)" \
+  && { [ -n "$PING_SOURCE" ] || { echo '未找到 ping 命令' >&2; false; }; } \
+  && { [ -n "$SETCAP_BIN" ] || { echo '未找到 setcap（请安装 libcap2-bin）' >&2; false; }; } \
+  && sudo install -d -m 750 -o root -g "$APP_GID" /usr/local/libexec/fnos-shutdown \
+  && sudo install -m 750 -o root -g "$APP_GID" "$PING_SOURCE" /usr/local/libexec/fnos-shutdown/ping \
+  && sudo "$SETCAP_BIN" cap_net_raw=ep /usr/local/libexec/fnos-shutdown/ping \
   && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \
   && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \
   && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \
   && printf 'net.ipv4.ping_group_range = %s\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \
   && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \
-  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \
+  && sudo -u fnos-app-shutdown /usr/local/libexec/fnos-shutdown/ping -c 1 -W 1 127.0.0.1 >/dev/null \
+  && sudo install -m 640 -o root -g "$APP_GID" /dev/null /usr/local/libexec/fnos-shutdown/ready \
   && rm -f /tmp/fnos-shutdown-executor.sh
 ```
 
-`<数据目录>` 由 About API 返回当前进程的 `STORAGE_DIR`（即 `${TRIM_PKGVAR}/data`），UI 使用 Shell 安全引用后替换。cron 中用 Bash `printf %q` 转义该值，保证每次触发和自更新后的 `exec` 都继承相同目录。部署命令同时保存系统原始 `ping_group_range`，再把应用用户 GID 合并进现有范围；重复部署不会覆盖原始值。
+`<数据目录>` 由 About API 返回当前进程的 `STORAGE_DIR`（即 `${TRIM_PKGVAR}/data`），UI 使用 Shell 安全引用后替换。cron 中用 Bash `printf %q` 转义该值。部署命令同时保留 `ping_group_range` 非特权 ICMP 路径，并把系统 `ping` 的真实二进制复制为应用专用的 `ping`：目录与文件仅 root/应用 GID 可访问，只有该副本获得 `cap_net_raw=ep`；BusyBox/Toybox 会根据副本文件名自动选择 ping applet。只有应用用户成功 ping 本机后才创建 `ready` 标记，应用以 helper 可执行且标记可读作为部署完整性依据。禁止给共享 `/bin/ping` 或系统 BusyBox 设置 capability。
 
 验证：
 
 ```bash
 DATA_DIR=<数据目录> \
   && test -d "$DATA_DIR" \
-  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \
+  && sudo -u fnos-app-shutdown /usr/local/libexec/fnos-shutdown/ping -c 1 -W 1 127.0.0.1 \
   && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run
 ```
 
@@ -458,6 +470,8 @@ DATA_DIR=<数据目录> \
 ```bash
 PING_GID_RANGE="$(sudo cat /var/lib/fnos-shutdown/ping-group-range.original 2>/dev/null || true)" \
   && sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown /etc/sysctl.d/99-fnos-shutdown-ping.conf \
+  && sudo rm -f /usr/local/libexec/fnos-shutdown/ping /usr/local/libexec/fnos-shutdown/ready \
+  && { sudo rmdir /usr/local/libexec/fnos-shutdown 2>/dev/null || true; } \
   && { [ -z "$PING_GID_RANGE" ] || sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE"; } \
   && sudo rm -f /var/lib/fnos-shutdown/ping-group-range.original \
   && { sudo rmdir /var/lib/fnos-shutdown 2>/dev/null || true; }
@@ -467,7 +481,7 @@ PING_GID_RANGE="$(sudo cat /var/lib/fnos-shutdown/ping-group-range.original 2>/d
 
 **应用侧（无 executor 环境）**：
 - 手工在 `data/` 放置样本 config.json/skip.json（§3.1/§3.2 示例），验证读写与校验
-- 手工伪造 `data/executor/status.json`（逐一构造四种判定谓词场景）+ 假日志文件，验证三态页与日志页
+- 手工伪造 `data/executor/status.json` 并切换 helper/ready 可访问性（逐一构造五种判定谓词场景）+ 假日志文件，验证部署状态与日志页
 
 **executor 侧（无应用环境）**：
 - `fnos-shutdown-executor.sh --version` / `--dry-run`：任意用户直接验证版本与检查逻辑，零副作用
