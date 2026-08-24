@@ -1,6 +1,8 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.7 · 2026-08-12（§3.6 新增执行器签名自更新：cron root 触发时验签同步包内新版脚本；§9 一键命令降为首次部署/修复用途）
+> 版本：v0.8 · 2026-08-24（§9 部署命令为应用用户配置非特权 ICMP Echo socket，修复低权限 `host_online` dry-run 的 ping rc=2）
+>
+> 历史：v0.7 · 2026-08-12（§3.6 新增执行器签名自更新：cron root 触发时验签同步包内新版脚本；§9 一键命令降为首次部署/修复用途）
 >
 > 历史：v0.6 · 2026-08-12（v2 第二批检查项纳入：`vm_running`、`process_running`、`disk_scrub`、`host_online`、`calendar_rules`；§3.4 新增日志会话分隔标记契约）
 > 读者：实现「智能关机」飞牛应用的桌面端 Agent
@@ -416,10 +418,24 @@ UI 三页：
 curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script" -o /tmp/fnos-shutdown-executor.sh \
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \
   && printf '*/10 * * * * root /usr/local/sbin/fnos-shutdown-executor.sh\n' | sudo tee /etc/cron.d/fnos-shutdown \
+  && APP_GID="$(id -g fnos-app-shutdown)" \
+  && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \
+  && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \
+  && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \
+  && printf 'net.ipv4.ping_group_range = %s\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \
+  && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \
+  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \
   && rm -f /tmp/fnos-shutdown-executor.sh
 ```
 
-验证：`sudo /usr/local/sbin/fnos-shutdown-executor.sh --version`
+部署命令先保存系统原始 `ping_group_range`，再把应用用户 GID 合并进现有范围；重复部署不会覆盖原始值。它只开放内核的非特权 ICMP Echo socket，不修改共享 `ping`/BusyBox 文件能力，不授予应用 root。
+
+验证：
+
+```bash
+sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \
+  && sudo /usr/local/sbin/fnos-shutdown-executor.sh --version
+```
 
 说明：命令经 SSH 在 NAS 本机执行，使用 127.0.0.1 + 应用直连端口（安装/设置向导配置，默认 8366；0=未启用时需先配置或使用备选方式）；经网关的 URL 有会话鉴权，curl 会返回 invalid token，不可用于本命令。
 
@@ -428,7 +444,11 @@ curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/s
 卸载执行器（应用卸载不自动执行，仅供用户手动）：
 
 ```bash
-sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown
+PING_GID_RANGE="$(sudo cat /var/lib/fnos-shutdown/ping-group-range.original 2>/dev/null || true)" \
+  && sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown /etc/sysctl.d/99-fnos-shutdown-ping.conf \
+  && { [ -z "$PING_GID_RANGE" ] || sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE"; } \
+  && sudo rm -f /var/lib/fnos-shutdown/ping-group-range.original \
+  && { sudo rmdir /var/lib/fnos-shutdown 2>/dev/null || true; }
 ```
 
 ## 10. 联调与自测（两侧可独立验证）

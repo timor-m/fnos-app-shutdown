@@ -10,15 +10,34 @@ import DeployBadge from "./DeployBadge.vue";
 const DEPLOY_COMMAND_TEMPLATE = `curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script" -o /tmp/fnos-shutdown-executor.sh \\
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
   && printf '*/10 * * * * root /usr/local/sbin/fnos-shutdown-executor.sh\\n' | sudo tee /etc/cron.d/fnos-shutdown \\
+  && APP_GID="$(id -g fnos-app-shutdown)" \\
+  && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \\
+  && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \\
+  && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \\
+  && printf 'net.ipv4.ping_group_range = %s\\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \\
+  && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \\
+  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
-const VERIFY_COMMAND = "sudo /usr/local/sbin/fnos-shutdown-executor.sh --version";
+const VERIFY_COMMAND = `sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \\
+  && sudo /usr/local/sbin/fnos-shutdown-executor.sh --version`;
 
 const MANUAL_INSTALL_COMMAND = `sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
   && printf '*/10 * * * * root /usr/local/sbin/fnos-shutdown-executor.sh\\n' | sudo tee /etc/cron.d/fnos-shutdown \\
+  && APP_GID="$(id -g fnos-app-shutdown)" \\
+  && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \\
+  && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \\
+  && { sudo test -f /var/lib/fnos-shutdown/ping-group-range.original || cat /proc/sys/net/ipv4/ping_group_range | sudo tee /var/lib/fnos-shutdown/ping-group-range.original >/dev/null; } \\
+  && printf 'net.ipv4.ping_group_range = %s\\n' "$PING_GID_RANGE" | sudo tee /etc/sysctl.d/99-fnos-shutdown-ping.conf >/dev/null \\
+  && sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE" \\
+  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 >/dev/null \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
-const UNINSTALL_COMMAND = "sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown";
+const UNINSTALL_COMMAND = `PING_GID_RANGE="$(sudo cat /var/lib/fnos-shutdown/ping-group-range.original 2>/dev/null || true)" \\
+  && sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown /etc/sysctl.d/99-fnos-shutdown-ping.conf \\
+  && { [ -z "$PING_GID_RANGE" ] || sudo sysctl -w "net.ipv4.ping_group_range=$PING_GID_RANGE"; } \\
+  && sudo rm -f /var/lib/fnos-shutdown/ping-group-range.original \\
+  && { sudo rmdir /var/lib/fnos-shutdown 2>/dev/null || true; }`;
 
 /** 应用直连端口（关于接口）；null = 未启用，一键命令退化为占位符并提示 */
 const servicePort = ref<number | null>(null);
@@ -141,6 +160,7 @@ onMounted(() => {
             <p class="step-title">复制一键命令（首次部署 / 手动修复）</p>
             <p class="field-desc">
               命令会从本应用下载执行器脚本（127.0.0.1 直连端口，免网关注销态）、安装到 <code>/usr/local/sbin/</code> 并写入 cron（每 10 分钟触发一次）。
+              同时仅为应用用户开放 ICMP Echo socket，使「主机在线」可在低权限手动检测中正常使用；不会授予应用 root 或 <code>CAP_NET_RAW</code>。
               首次部署后，应用升级时执行器会自动验签同步新版（§3.6），无需再跑命令。
             </p>
             <p v-if="servicePort === null" class="badge-hint warn">
@@ -180,7 +200,7 @@ onMounted(() => {
           <div class="step-body">
             <p class="step-title">验证部署结果</p>
             <p class="field-desc">
-              执行以下命令，输出版本号（应为 {{ status.executor.appVersion }}）即成功；上方部署状态随后自动转为「正常」。
+              执行以下命令，先验证应用用户可 ping 本机，再输出执行器版本号（应为 {{ status.executor.appVersion }}）；上方部署状态随后自动转为「正常」。
             </p>
             <div class="cmd-block">
               <div class="cmd-block-head">
@@ -252,7 +272,7 @@ onMounted(() => {
         <span>手动操作</span>
       </header>
       <p class="field-desc block-desc">
-        卸载本应用<strong>不会</strong>自动移除执行器；如需移除，请在 NAS 上手动执行：
+        卸载本应用<strong>不会</strong>自动移除执行器；如需移除，请在 NAS 上手动执行。命令会同时移除 ICMP 配置并恢复部署前的允许 GID 范围：
       </p>
       <div class="cmd-block">
         <div class="cmd-block-head">
