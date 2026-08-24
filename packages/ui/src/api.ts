@@ -166,6 +166,7 @@ export interface AboutData {
     node: string;
     maintainer: string;
     maintainerUrl: string;
+    qqGroup: string;
     repoUrl: string;
   };
   system: {

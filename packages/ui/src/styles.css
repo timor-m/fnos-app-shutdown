@@ -1550,6 +1550,40 @@ select.input {
   font-variant-numeric: tabular-nums;
 }
 
+.about-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-inset);
+  color: var(--brand-text);
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.about-copy:hover {
+  background: var(--bg-hover);
+  border-color: var(--brand);
+}
+
+.about-copy.copied {
+  border-color: var(--success);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.about-copy-error {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--danger);
+  font-size: 0.8rem;
+}
+
 .about-link {
   display: inline-flex;
   align-items: center;

@@ -22,6 +22,7 @@ export default defineEventHandler(() => {
       node: process.version,
       maintainer: templateConfig.maintainer,
       maintainerUrl: templateConfig.maintainerUrl,
+      qqGroup: templateConfig.qqGroup,
       repoUrl: templateConfig.maintainerUrl
     },
     system: {

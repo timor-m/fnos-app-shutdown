@@ -12,19 +12,25 @@
 - 今晚跳过（skip.json fail-safe）、手动检测当前是否满足关机条件
 - 明亮/暗黑双主题
 
+## 交流反馈
+
+QQ 群：`657153308`。欢迎扫码加入，交流使用经验、反馈问题和建议。
+
+<img src="snapshots/qq.jpg" alt="FN 智能关机 QQ 群二维码，群号 657153308" width="360" />
+
 ## 应用截图
 
 以下截图来自 iPhone SE 尺寸（375×667）高清预览：
 
 | 状态 | 设置 |
 | --- | --- |
-| ![状态页](snapshots/iphone-se-status.jpg) | ![设置页](snapshots/iphone-se-settings.jpg) |
+| ![状态页](snapshots/status.png) | ![设置页](snapshots/settings.png) |
 
 | 日志 | 部署 |
 | --- | --- |
-| ![日志页](snapshots/iphone-se-logs.jpg) | ![部署页](snapshots/iphone-se-deploy.jpg) |
+| ![日志页](snapshots/logs.png) | ![部署页](snapshots/deploy.png) |
 
-![关于页](snapshots/iphone-se-about.jpg)
+![关于页](snapshots/about.png)
 
 ## 环境要求
 

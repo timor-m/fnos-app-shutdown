@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import {
   AppWindow,
+  Check,
   Clock,
+  Copy,
   Cpu,
   Gauge,
   Github,
@@ -10,17 +12,36 @@ import {
   Info,
   Link2,
   MemoryStick,
+  MessageCircle,
   RefreshCw,
   Server,
   Tag,
   Timer,
   UserRound
 } from "lucide-vue-next";
-import { fetchAbout, type AboutData } from "../api";
+import { copyToClipboard, fetchAbout, type AboutData } from "../api";
 
 const loading = ref(true);
 const error = ref("");
 const about = ref<AboutData | null>(null);
+const qqCopyState = ref<"idle" | "copied" | "error">("idle");
+let qqCopyTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function copyQqGroup() {
+  if (!about.value) return;
+
+  try {
+    await copyToClipboard(about.value.app.qqGroup);
+    qqCopyState.value = "copied";
+  } catch {
+    qqCopyState.value = "error";
+  }
+
+  if (qqCopyTimer) clearTimeout(qqCopyTimer);
+  qqCopyTimer = setTimeout(() => {
+    qqCopyState.value = "idle";
+  }, 2000);
+}
 
 async function load() {
   loading.value = true;
@@ -36,6 +57,10 @@ async function load() {
 
 onMounted(() => {
   void load();
+});
+
+onBeforeUnmount(() => {
+  if (qqCopyTimer) clearTimeout(qqCopyTimer);
 });
 
 // ---------- 展示格式化 ----------
@@ -165,6 +190,27 @@ const cpuText = computed(() => {
               <Link2 :size="13" class="about-link-icon" />
               <span class="about-link-text">{{ about.app.maintainer }}</span>
             </a>
+          </span>
+        </div>
+        <div class="about-item">
+          <MessageCircle :size="15" class="about-icon" />
+          <span class="about-label">QQ 群</span>
+          <span class="about-value">
+            <button
+              class="about-copy"
+              :class="{ copied: qqCopyState === 'copied' }"
+              type="button"
+              :title="qqCopyState === 'copied' ? '群号已复制' : '点击复制 QQ 群号'"
+              @click="copyQqGroup"
+            >
+              <span class="tabular">{{ about.app.qqGroup }}</span>
+              <Check v-if="qqCopyState === 'copied'" :size="14" />
+              <Copy v-else :size="14" />
+              <span>{{ qqCopyState === "copied" ? "已复制" : "复制" }}</span>
+            </button>
+            <span v-if="qqCopyState === 'error'" class="about-copy-error" role="status">
+              复制失败，请手动选择群号
+            </span>
           </span>
         </div>
         <div class="about-item">
