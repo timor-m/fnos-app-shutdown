@@ -7,7 +7,6 @@
 # 测试钩子（未列入契约，仅供本机开发联调；默认值与契约 §3.0 一致）：
 #   FNOS_SHUTDOWN_DATA_DIR   必填的数据目录（由部署命令写入 cron）
 #   FNOS_SHUTDOWN_LOCK_FILE  覆盖锁文件路径（默认 /run/fnos-shutdown.lock），便于非 root 测试
-#   FNOS_SHUTDOWN_PING_HELPER 覆盖私有 ping helper（测试用）
 
 # shellcheck disable=SC2317
 # SC2317 豁免理由：check_cpu/check_load/.../net_byte_sum 等函数经 run_all_checks 与 dry_run 中的
@@ -16,7 +15,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.1"
 
 DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-}"
 EXEC_DIR=""
@@ -24,7 +23,6 @@ CONFIG_FILE=""
 SKIP_FILE=""
 STATUS_FILE=""
 LOCK_FILE="${FNOS_SHUTDOWN_LOCK_FILE:-/run/fnos-shutdown.lock}"
-PING_HELPER_BIN="${FNOS_SHUTDOWN_PING_HELPER:-/usr/local/libexec/fnos-shutdown/ping}"
 
 # §3.6 签名自更新：cron root 触发时对比包内脚本版本，验签通过才原子替换自身。
 # 信任锚 = 首次 sudo 部署时锚定的内嵌公钥；包内脚本+签名应用用户可写，无私钥无法伪造。
@@ -893,17 +891,17 @@ check_host_online() {
         R_DETAIL="hosts 为空数组，无待检主机，视为通过"
         return 0
     fi
-    if [ ! -x "$PING_HELPER_BIN" ] && ! command -v ping >/dev/null 2>&1; then
+    if ! command -v ping >/dev/null 2>&1; then
         R_STATUS=FAIL; R_DETAIL="ping 命令不可用"; return 1
     fi
     for h in $CFG_HOSTS; do
-        run_ping -c 1 -W 1 "$h" >/dev/null 2>&1
+        ping -c 1 -W 1 "$h" >/dev/null 2>&1
         rc=$?
         case $rc in
             0) up="$up $h" ;;
             1) : ;;   # 不可达
             *) # rc>=2：socket 权限不足等执行错误，测量失败 fail-safe（防误判全部离线而误关机）
-               R_STATUS=FAIL; R_DETAIL="ping $h 执行错误（rc=$rc）；请在部署页重新执行 v1.0.2 一键部署命令安装私有 ping helper"; return 1 ;;
+               R_STATUS=FAIL; R_DETAIL="ping $h 执行错误（rc=$rc，缺 cap_net_raw/setuid？请重跑部署命令）"; return 1 ;;
         esac
     done
     if [ -z "$up" ]; then
@@ -912,15 +910,6 @@ check_host_online() {
     fi
     R_DETAIL="在线主机:${up}（需全部不可达）"
     R_STATUS=BUSY; return 1
-}
-
-run_ping() {
-    if [ -x "$PING_HELPER_BIN" ]; then
-        # 副本固定命名为 ping，BusyBox/Toybox 会据 argv[0] 自动选择 ping applet。
-        "$PING_HELPER_BIN" "$@"
-    else
-        command ping "$@"
-    fi
 }
 
 check_calendar_rules() {

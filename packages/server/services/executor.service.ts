@@ -1,5 +1,5 @@
-import { constants, existsSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import packageJson from "../../../package.json" with { type: "json" };
@@ -17,29 +17,14 @@ export type ExecutorStatusFile = {
   [key: string]: unknown;
 };
 
-// 契约 §3.3 应用派生状态（部署页五态），谓词逐字实现：
+// 契约 §3.3 应用派生状态（部署页四态），谓词逐字实现：
 //   undeployed：status.json 不存在（损坏按不存在处理，§6）
 //   outdated ：存在且 script_version != 应用包内版本
 //   stalled  ：存在且版本一致但 now - last_trigger > 20 分钟
-//   incomplete：版本与心跳正常，但私有 ping helper 未完成部署
-//   ok       ：版本、心跳与私有 helper 均正常
-export type ExecutorState = "undeployed" | "outdated" | "stalled" | "incomplete" | "ok";
+//   ok       ：版本与心跳均正常
+export type ExecutorState = "undeployed" | "outdated" | "stalled" | "ok";
 
 const STALL_THRESHOLD_MS = 20 * 60 * 1000;
-const PING_HELPER_PATH = "/usr/local/libexec/fnos-shutdown/ping";
-const PING_HELPER_READY_PATH = "/usr/local/libexec/fnos-shutdown/ready";
-
-async function isPingHelperReady() {
-  try {
-    await Promise.all([
-      access(PING_HELPER_PATH, constants.X_OK),
-      access(PING_HELPER_READY_PATH, constants.R_OK)
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export type ExecutorStatusResult = {
   state: ExecutorState;
@@ -48,7 +33,6 @@ export type ExecutorStatusResult = {
 };
 
 export async function readExecutorStatus(now = new Date()): Promise<ExecutorStatusResult> {
-  const pingHelperReady = await isPingHelperReady();
   let raw: string;
   try {
     raw = await readFile(getStatusFilePath(), "utf8");
@@ -81,10 +65,6 @@ export async function readExecutorStatus(now = new Date()): Promise<ExecutorStat
 
   if (Number.isNaN(lastTriggerMs) || now.getTime() - lastTriggerMs > STALL_THRESHOLD_MS) {
     return { state: "stalled", status, appVersion: APP_VERSION };
-  }
-
-  if (!pingHelperReady) {
-    return { state: "incomplete", status, appVersion: APP_VERSION };
   }
 
   return { state: "ok", status, appVersion: APP_VERSION };

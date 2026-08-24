@@ -19,8 +19,6 @@ const badge = computed<{ icon: Component; label: string; cls: string; hint: stri
       return { icon: AlertTriangle, label: "版本过旧", cls: "badge-warn", hint: "" };
     case "stalled":
       return { icon: AlertCircle, label: "运行异常", cls: "badge-stalled", hint: "超过 20 分钟未收到执行器心跳，cron 可能失效" };
-    case "incomplete":
-      return { icon: AlertTriangle, label: "部署不完整", cls: "badge-warn", hint: "私有 ping helper 未安装或验证未通过" };
   }
 });
 

@@ -1,15 +1,10 @@
 # Changelog
 
-## 1.0.2
-
-- 修复部分 fnOS 使用 BusyBox/raw-socket `ping` 时 `ping_group_range` 仍返回 rc=2：部署应用专用、组权限隔离的 `cap_net_raw` ping helper，不修改系统共享 `ping`
-- 新增「部署不完整」状态：执行器版本正常但私有 ping helper 尚未通过部署验证时持续提示重新执行一键命令
-- 设置页工作阶段改用原生时间选择器，iOS/iPadOS 使用系统滚轮交互
-
 ## 1.0.1
 
 - 修复执行器默认数据目录硬编码 `/vol1`：部署命令把应用实际 `STORAGE_DIR` 显式写入 cron；不再以 `/var/apps` 或任何猜测路径兜底，目录缺失或无效时安全退出
-- 部署命令为应用用户配置非特权 ICMP Echo socket，修复「主机在线」手动检测的 ping rc=2
+- 部署命令通过 `sudo setcap cap_net_raw+ep "$(command -v ping)"` 为系统 ping 授权，修复低权限应用用户执行「主机在线」检测返回 rc=2
+- 设置页工作阶段改用原生时间选择器，iOS/iPadOS 使用系统滚轮交互
 
 ## 1.0.0
 

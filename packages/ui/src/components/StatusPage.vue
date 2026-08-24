@@ -68,8 +68,6 @@ const deployBanner = computed<{ cls: string; text: string } | null>(() => {
       };
     case "stalled":
       return { cls: "warn", text: "超过 20 分钟未收到执行器心跳，cron 可能失效，请到部署向导检查。" };
-    case "incomplete":
-      return { cls: "warn", text: "执行器已运行，但私有 ping helper 尚未部署；主机在线检测可能失败，请重新执行部署页的一键命令。" };
     default:
       return null;
   }

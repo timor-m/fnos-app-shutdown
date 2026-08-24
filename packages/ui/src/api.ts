@@ -120,7 +120,7 @@ export interface ShutdownConfig {
   };
 }
 
-export type ExecutorState = "undeployed" | "ok" | "outdated" | "stalled" | "incomplete";
+export type ExecutorState = "undeployed" | "ok" | "outdated" | "stalled";
 
 export interface StatusJson {
   script_version?: string;
