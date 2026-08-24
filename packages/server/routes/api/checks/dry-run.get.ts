@@ -38,7 +38,7 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 
 function runDryRun(scriptPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // DATA_DIR 对齐应用自身数据根：生产 STORAGE_DIR 即契约 DATA_DIR（=脚本默认），
+    // DATA_DIR 对齐应用自身数据根：生产 STORAGE_DIR 即契约 DATA_DIR，
     // dev 回退 <cwd>/data，使 dry-run 读到的 config/skip 与页面一致。
     const env = { ...process.env, FNOS_SHUTDOWN_DATA_DIR: getDataDir() };
     execFile(

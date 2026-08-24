@@ -1,6 +1,10 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.8 · 2026-08-24（§9 部署命令为应用用户配置非特权 ICMP Echo socket，修复低权限 `host_online` dry-run 的 ping rc=2）
+> 版本：v0.10 · 2026-08-24（取消所有数据目录猜测；`FNOS_SHUTDOWN_DATA_DIR` 缺失或无效时执行器安全退出）
+>
+> 历史：v0.9 · 2026-08-24（§9 从应用运行时读取实际 `STORAGE_DIR` 并显式写入 cron）
+>
+> 历史：v0.8 · 2026-08-24（§9 部署命令为应用用户配置非特权 ICMP Echo socket，修复低权限 `host_online` dry-run 的 ping rc=2）
 >
 > 历史：v0.7 · 2026-08-12（§3.6 新增执行器签名自更新：cron root 触发时验签同步包内新版脚本；§9 一键命令降为首次部署/修复用途）
 >
@@ -55,7 +59,7 @@
 1. executor **永不写** `config.json`、`skip.json`；应用**永不写** `data/executor/` 内任何文件
 2. 应用**不得解析日志内容**（§3.4），只做原文展示；结构化状态一律走 `status.json`
 3. 应用不得尝试 `sudo`、写 crontab、调 polkit——部署执行器只能引导用户手动完成（§9）
-4. executor 不得访问 `/vol2`、`/vol3` 下任何路径（机械盘休眠保护）
+4. executor 只能在 `FNOS_SHUTDOWN_DATA_DIR` 指定的数据根目录内访问契约文件，不得遍历或读取其他用户数据目录；该根目录可合法位于 `/vol2`、`/vol3` 等应用实际安装卷
 5. executor 解析配置**禁止** `source`/eval 任何契约文件内容，必须白名单字段解析（§3.1 校验列）
 6. executor **不得执行任何外部脚本/钩子/命令拼接**——能力集合封闭（§4.6、§12-D1）
 
@@ -66,7 +70,7 @@
 - 所有契约文件：UTF-8、JSON（日志除外）、Unix 换行
 - **写入协议**：写到同目录 `<目标名>.tmp`，`fsync` 后 `rename` 覆盖目标；同目录 rename 保证原子性。读取侧忽略所有 `*.tmp`
 - 时间戳：一律本地时区 ISO 8601 带偏移，如 `2026-08-11T23:30:01+08:00`；时刻字段（HH:MM）为本地时间
-- 数据根目录：`DATA_DIR=/vol1/@appdata/fnos-app-shutdown/data`（应用内即 `${TRIM_PKGVAR}/data`）；executor 输出目录：`EXEC_DIR=$DATA_DIR/executor`（executor 启动时 `mkdir -p`，不存在即建）
+- 数据根目录：应用内为 `${TRIM_PKGVAR}/data`，并通过运行时 `STORAGE_DIR` 暴露给部署页；cron 必须以 `FNOS_SHUTDOWN_DATA_DIR` 显式传给 executor。executor 不设默认目录，也不得硬编码或猜测 `/vol1`、`/var/apps` 等路径。变量缺失、不是绝对路径、指向 `/` 或目录不存在时必须在读配置、写状态和关机前安全退出。只有数据根目录已存在时，executor 才可创建 `EXEC_DIR=$DATA_DIR/executor`
 
 ### 3.1 `config.json`（应用写 → executor 读）
 
@@ -253,13 +257,16 @@
 
 ### 4.2 退出码
 
-`0` 正常路径（含 disabled/skipped/out_of_window/完成监控）；`2` 另一实例持有锁；`3` 参数错误。poweroff 路径不返回。
+`0` 正常路径（含 disabled/skipped/out_of_window/完成监控，以及无参数 cron 因数据目录无效而安全退出）；`1` dry-run 的数据目录无效；`2` 另一实例持有锁；`3` 参数错误。poweroff 路径不返回。
 
 ### 4.3 主流程（伪代码即规约）
 
 ```bash
 [ "$1" = "--version" ] && { echo "$SCRIPT_VERSION"; exit 0; }
 exec 9>/run/fnos-shutdown.lock; flock -n 9 || exit 2
+self_update
+init_data_paths || exit 0                 # 不读写文件、不关机
+mkdir -p "$EXEC_DIR"
 
 read_config; write_status(triggered)      # triggered 仅表"入口写"语义：刷新 last_trigger 与
                                           # config_fallback，last_action 保留上次值（非枚举新增值，
@@ -363,7 +370,7 @@ C. 动作类
 
 **D. 部署/升级**：用户在部署页复制一键命令（§9）→ SSH 粘贴执行（幂等）→ 下一脚 cron（≤10 分钟）写出 status.json → 部署页三态转绿/转黄逻辑见 §3.3。应用升级导致包内 SCRIPT_VERSION 高于 status.json 中的版本 → 显示 🟡 引导重跑同一命令。
 
-**E. 应用卸载**：应用与 `data/` 可能被清除 → config.json/skip.json 缺失 → executor 以默认值继续工作（兜底）；executor 本体的卸载只能由用户手动执行（§9），应用不得尝试。
+**E. 应用卸载**：应用与 `data/` 可能被清除 → `FNOS_SHUTDOWN_DATA_DIR` 指向的目录不存在 → executor 安全退出，不创建目录、不使用默认配置、不关机；executor 本体的卸载只能由用户手动执行（§9），应用不得尝试。
 
 ## 6. 错误处理矩阵
 
@@ -376,7 +383,8 @@ C. 动作类
 | skip.json 损坏 | **视为跳过生效**（fail-safe）+ 警告 | 提示并允许删除重写 |
 | status.json 缺失 | （自身写入方，不涉及） | 判定 🔴 未部署 |
 | status.json 损坏 | 下次触发覆盖重写 | 判定 🔴 未部署（提示核查） |
-| data/ 整体缺失 | mkdir -p 自建 EXEC_DIR，配置用默认 | 应用启动时自建 data 结构 |
+| `FNOS_SHUTDOWN_DATA_DIR` 缺失/非绝对/指向根目录 | 向 stderr 输出重新部署提示；无参数调用退出 0，dry-run 退出 1；不读写文件、不关机 | 部署页不生成可复制的有效命令 |
+| data/ 整体缺失 | 同上安全退出，不创建目录、不使用默认配置、不关机 | 应用启动时自建 data 结构；用户重新部署前核查安装卷 |
 | 读 config 时权限错误 | 视为缺失（兜底） | 提示异常 |
 | 写 status 时磁盘满等 I/O 错误 | 记 stderr，继续主流程（状态上报失败不阻塞关机逻辑） | — |
 
@@ -410,14 +418,16 @@ UI 三页：
 
 ## 9. 部署命令规约（UI 一字不差展示）
 
-**v0.7 起**：本命令用于**首次部署与手动修复**；完成首次部署后，应用升级时执行器经 §3.6 签名自更新自动同步，无需再跑命令。
+**v1.0.1 起**：本命令除首次部署与手动修复外，还负责把实际数据目录写入 cron。由 v1.0.0 或更早版本升级的设备必须重新执行一次；之后执行器版本仍可经 §3.6 签名自更新。
 
 一键部署/修复（幂等，可重复执行）：
 
 ```bash
 curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script" -o /tmp/fnos-shutdown-executor.sh \
+  && DATA_DIR=<数据目录> \
+  && test -d "$DATA_DIR" \
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \
-  && printf '*/10 * * * * root /usr/local/sbin/fnos-shutdown-executor.sh\n' | sudo tee /etc/cron.d/fnos-shutdown \
+  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \
   && APP_GID="$(id -g fnos-app-shutdown)" \
   && PING_GID_RANGE="$(awk -v gid="$APP_GID" '{ min=$1; max=$2; if (gid < min) min=gid; if (gid > max) max=gid; print min, max }' /proc/sys/net/ipv4/ping_group_range)" \
   && sudo install -d -m 755 -o root -g root /etc/sysctl.d /var/lib/fnos-shutdown \
@@ -428,13 +438,15 @@ curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/s
   && rm -f /tmp/fnos-shutdown-executor.sh
 ```
 
-部署命令先保存系统原始 `ping_group_range`，再把应用用户 GID 合并进现有范围；重复部署不会覆盖原始值。它只开放内核的非特权 ICMP Echo socket，不修改共享 `ping`/BusyBox 文件能力，不授予应用 root。
+`<数据目录>` 由 About API 返回当前进程的 `STORAGE_DIR`（即 `${TRIM_PKGVAR}/data`），UI 使用 Shell 安全引用后替换。cron 中用 Bash `printf %q` 转义该值，保证每次触发和自更新后的 `exec` 都继承相同目录。部署命令同时保存系统原始 `ping_group_range`，再把应用用户 GID 合并进现有范围；重复部署不会覆盖原始值。
 
 验证：
 
 ```bash
-sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \
-  && sudo /usr/local/sbin/fnos-shutdown-executor.sh --version
+DATA_DIR=<数据目录> \
+  && test -d "$DATA_DIR" \
+  && sudo -u fnos-app-shutdown ping -c 1 -W 1 127.0.0.1 \
+  && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run
 ```
 
 说明：命令经 SSH 在 NAS 本机执行，使用 127.0.0.1 + 应用直连端口（安装/设置向导配置，默认 8366；0=未启用时需先配置或使用备选方式）；经网关的 URL 有会话鉴权，curl 会返回 invalid token，不可用于本命令。

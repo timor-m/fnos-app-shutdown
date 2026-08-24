@@ -1,4 +1,5 @@
 import templateConfig from "../../../template.config.json" with { type: "json" };
+import { isAbsolute } from "node:path";
 
 export type AppRuntimeConfig = {
   appName: string;
@@ -10,11 +11,13 @@ export type AppRuntimeConfig = {
   servicePort: number | null;
   logLevel: string;
   logDir: string;
-  storageDir: string;
+  /** fnOS 传入的实际应用数据目录；缺失时不得猜测系统盘路径。 */
+  storageDir: string | null;
 };
 
 export function getAppConfig(): AppRuntimeConfig {
   const appName = process.env.APP_NAME || templateConfig.appName;
+  const storageDir = process.env.STORAGE_DIR;
 
   return {
     appName,
@@ -27,6 +30,6 @@ export function getAppConfig(): AppRuntimeConfig {
     servicePort: Number(process.env.SERVICE_PORT || 0) || null,
     logLevel: process.env.LOG_LEVEL || templateConfig.logLevel,
     logDir: process.env.LOG_DIR || `/var/apps/${appName}/var/log`,
-    storageDir: process.env.STORAGE_DIR || `/var/apps/${appName}/var/data`
+    storageDir: storageDir && isAbsolute(storageDir) ? storageDir : null
   };
 }

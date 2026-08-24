@@ -1,11 +1,11 @@
 #!/bin/bash
 # fnos-shutdown-executor.sh — fnOS「智能关机」root 执行器
 #
-# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.6
+# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.10
 #   §3.0–§3.4 文件接口 / §4.1–§4.6 行为规约 / §6 错误处理矩阵
 #
 # 测试钩子（未列入契约，仅供本机开发联调；默认值与契约 §3.0 一致）：
-#   FNOS_SHUTDOWN_DATA_DIR   覆盖 DATA_DIR（默认 /vol1/@appdata/fnos-app-shutdown/data）
+#   FNOS_SHUTDOWN_DATA_DIR   必填的数据目录（由部署命令写入 cron）
 #   FNOS_SHUTDOWN_LOCK_FILE  覆盖锁文件路径（默认 /run/fnos-shutdown.lock），便于非 root 测试
 
 # shellcheck disable=SC2317
@@ -15,13 +15,13 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.0.1"
 
-DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-/vol1/@appdata/fnos-app-shutdown/data}"
-EXEC_DIR="$DATA_DIR/executor"
-CONFIG_FILE="$DATA_DIR/config.json"
-SKIP_FILE="$DATA_DIR/skip.json"
-STATUS_FILE="$EXEC_DIR/status.json"
+DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-}"
+EXEC_DIR=""
+CONFIG_FILE=""
+SKIP_FILE=""
+STATUS_FILE=""
 LOCK_FILE="${FNOS_SHUTDOWN_LOCK_FILE:-/run/fnos-shutdown.lock}"
 
 # §3.6 签名自更新：cron root 触发时对比包内脚本版本，验签通过才原子替换自身。
@@ -87,7 +87,7 @@ log_raw() {
     # 日志：§3.4 [YYYY-MM-DD HH:MM:SS] <消息>，按月滚动，append
     local line
     line="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-    if [ "$DRY_RUN" = "1" ]; then
+    if [ "$DRY_RUN" = "1" ] || [ -z "$EXEC_DIR" ]; then
         printf '%s\n' "$line" >&2
     else
         printf '%s\n' "$line" >> "$EXEC_DIR/$(date '+%Y-%m').log" 2>/dev/null \
@@ -97,6 +97,24 @@ log_raw() {
 
 log_info() { log_raw "$*"; }
 log_warn() { log_raw "警告: $*"; }
+
+init_data_paths() {
+    local resolved
+    if [ -z "$DATA_DIR" ] || [[ "$DATA_DIR" != /* ]] || [ ! -d "$DATA_DIR" ]; then
+        printf 'FNOS_SHUTDOWN_DATA_DIR 未配置或不是已存在的绝对目录；请在应用部署页重新执行一键部署命令\n' >&2
+        return 1
+    fi
+    resolved=$(cd -- "$DATA_DIR" 2>/dev/null && pwd -P) || resolved=""
+    if [ -z "$resolved" ] || [ "$resolved" = "/" ]; then
+        printf 'FNOS_SHUTDOWN_DATA_DIR 不得指向根目录；请在应用部署页重新执行一键部署命令\n' >&2
+        return 1
+    fi
+    DATA_DIR="$resolved"
+    EXEC_DIR="$DATA_DIR/executor"
+    CONFIG_FILE="$DATA_DIR/config.json"
+    SKIP_FILE="$DATA_DIR/skip.json"
+    STATUS_FILE="$EXEC_DIR/status.json"
+}
 
 is_int() { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 
@@ -942,6 +960,7 @@ run_all_checks() {
 dry_run() {
     DRY_RUN=1
     local c st all_pass=1
+    init_data_paths || exit 1
     printf 'fnos-shutdown-executor --dry-run（SCRIPT_VERSION=%s）\n' "$SCRIPT_VERSION"
     printf 'DATA_DIR=%s\n' "$DATA_DIR"
     read_config
@@ -1062,9 +1081,11 @@ main() {
         exit 2
     fi
 
-    mkdir -p "$EXEC_DIR"
     # §3.6：取锁后先自更新（成功则 exec 新版，由新版写标记行）；--version/--dry-run 不经此路径
     self_update "$@"
+    # DATA_DIR 不允许猜测。旧 cron 未传变量时先完成自更新，再 fail-safe 退出，等待用户重跑部署命令。
+    init_data_paths || exit 0
+    mkdir -p "$EXEC_DIR"
     # §3.4 会话分隔标记：每次触发的首条日志，消息体以 "=== " 开头、" ===" 结尾（应用可按此分组）
     log_info "=== 触发执行（v$SCRIPT_VERSION）==="
 

@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 // 契约 §3.0：DATA_DIR 为应用数据根目录；生产环境 cmd/main 会设置
-// STORAGE_DIR=${TRIM_PKGVAR}/data，正好等于契约 DATA_DIR。
+// STORAGE_DIR=${TRIM_PKGVAR}/data，正好等于契约 DATA_DIR；不假设应用安装在特定存储卷。
 // 本地开发未设置 STORAGE_DIR 时回退 <cwd>/data。
 export function getDataDir() {
   return process.env.STORAGE_DIR || join(process.cwd(), "data");

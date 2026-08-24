@@ -162,6 +162,8 @@ export interface AboutData {
     accessMode: "gateway" | "port";
     /** 向导配置的直连端口；null = 未启用 */
     servicePort: number | null;
+    /** 应用实际数据目录（${TRIM_PKGVAR}/data），供部署命令传给 root 执行器 */
+    storageDir: string | null;
     runtime: string;
     node: string;
     maintainer: string;

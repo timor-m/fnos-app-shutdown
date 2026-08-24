@@ -450,9 +450,27 @@ onMounted(() => {
           <p class="field-desc">左闭右开；开始晚于结束表示跨零点（如 23:00 – 08:00）。</p>
         </div>
         <div class="field-inputs window-inputs">
-          <input v-model="form.windowStart" class="input" type="text" placeholder="23:00" maxlength="5" />
-          <span class="text-muted">–</span>
-          <input v-model="form.windowEnd" class="input" type="text" placeholder="08:00" maxlength="5" />
+          <label class="time-input-field">
+            <span class="time-input-label">开始</span>
+            <input
+              v-model="form.windowStart"
+              class="input time-input"
+              type="time"
+              step="60"
+              aria-label="工作阶段开始时间"
+            />
+          </label>
+          <span class="time-range-separator" aria-hidden="true">至</span>
+          <label class="time-input-field">
+            <span class="time-input-label">结束</span>
+            <input
+              v-model="form.windowEnd"
+              class="input time-input"
+              type="time"
+              step="60"
+              aria-label="工作阶段结束时间"
+            />
+          </label>
         </div>
       </div>
       <p v-if="fieldErrors.windowStart" class="field-error">{{ fieldErrors.windowStart }}</p>

@@ -18,6 +18,7 @@ export default defineEventHandler(() => {
       gatewayPrefix: cfg.gatewayPrefix,
       accessMode: cfg.accessMode,
       servicePort: cfg.servicePort,
+      storageDir: cfg.storageDir,
       runtime: "nitro",
       node: process.version,
       maintainer: templateConfig.maintainer,

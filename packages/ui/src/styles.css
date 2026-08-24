@@ -932,9 +932,37 @@ mark {
   flex-shrink: 0;
 }
 
-.window-inputs .input {
-  width: 84px;
-  text-align: center;
+.window-inputs {
+  gap: 10px;
+}
+
+.time-input-field {
+  display: grid;
+  gap: 4px;
+  min-width: 118px;
+}
+
+.time-input-label {
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.time-input {
+  width: 118px;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-range-separator {
+  align-self: end;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-3);
+  font-size: 0.8rem;
 }
 
 .input {
@@ -1396,13 +1424,18 @@ select.input {
   transition: background-color 0.15s ease;
 }
 
-.copy-btn:hover {
+.copy-btn:hover:not(:disabled) {
   background: var(--code-line-hover);
 }
 
 .copy-btn.copied {
   color: #4ade80;
   border-color: rgba(74, 222, 128, 0.4);
+}
+
+.copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .cmd-view {
@@ -1665,6 +1698,19 @@ select.input {
   .field-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .window-inputs {
+    width: 100%;
+  }
+
+  .time-input-field {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .time-input {
+    width: 100%;
   }
 
   .about-label {
