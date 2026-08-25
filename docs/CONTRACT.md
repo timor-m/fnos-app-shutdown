@@ -449,7 +449,7 @@ DATA_DIR=<数据目录> \
   && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run
 ```
 
-说明：命令经 SSH 在 NAS 本机执行，使用 127.0.0.1 + 应用直连端口（安装/设置向导配置，默认 8366；0=未启用时需先配置或使用备选方式）；经网关的 URL 有会话鉴权，curl 会返回 invalid token，不可用于本命令。
+说明：命令经 SSH 在 NAS 本机执行，使用仅绑定 `127.0.0.1` 的本机服务端口（安装/设置向导配置，默认 8366；0=未启用时需先配置或使用备选方式）；直连端口不对局域网开放，外部访问必须经过 fnOS 网关。
 备选（直连端口未启用时）：UI 复制脚本全文 → 存为 `/tmp/fnos-shutdown-executor.sh` → 执行上面 `sudo install` 起的后半段。
 
 卸载执行器（应用卸载不自动执行，仅供用户手动）：

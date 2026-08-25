@@ -1,6 +1,6 @@
 {
   "name": "fnos-app-shutdown",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "fnOS smart shutdown app: idle checks inside a nightly window trigger poweroff",
   "type": "module",
   "workspaces": [

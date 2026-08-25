@@ -229,9 +229,9 @@ process.on("SIGTERM", shutdown);
 if (socketPath) {
   cleanupSocket();
   listen(socketPath, 0, "");
-  // 直连端口面向局域网访问，绑定 0.0.0.0；绕过网关即无 NAS 登录态校验，由向导向用户明示
+  // 直连端口仅供 NAS 本机部署脚本使用，绑定回环地址，禁止通过局域网绕过网关鉴权
   if (servicePort > 0) {
-    listen("", servicePort, "0.0.0.0");
+    listen("", servicePort, "127.0.0.1");
   }
 } else {
   listen("", servicePort > 0 ? servicePort : devPort, host);
@@ -393,7 +393,7 @@ const servicePortWizardItem = {
 const servicePortTips = {
   type: "tips",
   helpText:
-    "直连端口可绕过统一网关访问本应用（http://NAS地址:端口）。注意：直连访问不经过 NAS 登录校验，局域网内任何人可操作，请谨慎开启。修改端口后需重启应用生效。"
+    "直连端口仅绑定 NAS 本机回环地址（127.0.0.1），用于部署页从本机下载执行器脚本，不对局域网开放，也不会提供绕过网关的远程访问。修改端口后需重启应用生效。"
 };
 
 const installWizard = [
