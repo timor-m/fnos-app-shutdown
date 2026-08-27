@@ -140,7 +140,7 @@ export interface SkipInfo {
 }
 
 export interface StatusData {
-  executor: { state: ExecutorState; status: StatusJson | null; appVersion: string };
+  executor: { state: ExecutorState; status: StatusJson | null; appVersion: string; statusReadError?: string };
   skip: SkipInfo;
   config: {
     enabled: boolean;

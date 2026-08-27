@@ -21,7 +21,8 @@ export default defineEventHandler(async () => {
     executor: {
       state: executor.state,
       status: executor.status,
-      appVersion: executor.appVersion
+      appVersion: executor.appVersion,
+      statusReadError: executor.statusReadError
     },
     skip,
     config: {

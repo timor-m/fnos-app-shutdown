@@ -3,6 +3,6 @@ import { ok } from "../../../utils/api-response";
 import { readExecutorStatus } from "../../../services/executor.service";
 
 export default defineEventHandler(async () => {
-  const { state, status } = await readExecutorStatus();
-  return ok({ state, status });
+  const { state, status, statusReadError } = await readExecutorStatus();
+  return ok({ state, status, statusReadError });
 });

@@ -10,33 +10,39 @@ function shellQuote(value: string) {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
 
-// ---------- §9 命令（一字不差，仅替换 <直连端口>） ----------
+// ---------- §9 命令（变量化展示，执行步骤保持不变） ----------
 // 命令经 SSH 在 NAS 本机执行：用 127.0.0.1 + 应用直连端口（wizard 配置），
 // 绕开网关注销态校验与域名回环（hairpin）问题
-const DEPLOY_COMMAND_TEMPLATE = `curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script" -o /tmp/fnos-shutdown-executor.sh \\
-  && DATA_DIR=<数据目录> \\
-  && test -d "$DATA_DIR" \\
-  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
-  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \\
+const DEPLOY_COMMAND_TEMPLATE = `D=<数据目录>
+S='/usr/local/sbin/fnos-shutdown-executor.sh'
+U="http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script"
+
+curl -fsSL "$U" -o /tmp/fnos-shutdown-executor.sh \\
+  && test -d "$D" \\
+  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
+  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
   && PING_BIN="$(command -v ping)" \\
   && sudo setcap cap_net_raw+ep "$PING_BIN" \\
   && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
-const VERIFY_COMMAND_TEMPLATE = `DATA_DIR=<数据目录> \\
-  && test -d "$DATA_DIR" \\
-  && PING_BIN="$(command -v ping)" \\
-  && sudo getcap "$PING_BIN" \\
-  && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 \\
-  && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run`;
+const VERIFY_COMMAND_TEMPLATE = `D=<数据目录>
+S='/usr/local/sbin/fnos-shutdown-executor.sh'
 
-const MANUAL_INSTALL_COMMAND_TEMPLATE = `DATA_DIR=<数据目录> \\
-  && test -d "$DATA_DIR" \\
-  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \\
-  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \\
+test -d "$D" \\
+  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify`;
+
+const MANUAL_INSTALL_COMMAND_TEMPLATE = `D=<数据目录>
+S='/usr/local/sbin/fnos-shutdown-executor.sh'
+
+test -d "$D" \\
+  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
+  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
   && PING_BIN="$(command -v ping)" \\
   && sudo setcap cap_net_raw+ep "$PING_BIN" \\
   && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
 const UNINSTALL_COMMAND = `sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown`;
@@ -150,6 +156,9 @@ onMounted(() => {
         :status="status.executor.status"
         :app-version="status.executor.appVersion"
       />
+      <p v-if="status.executor.statusReadError" class="badge-hint warn">
+        无法读取执行器状态文件（{{ status.executor.statusReadError }}）。请检查应用数据目录与 executor 目录权限；版本号验证成功不代表状态文件可读。
+      </p>
       <p v-if="status.executor.state === 'outdated'" class="badge-hint warn">
         执行器脚本版本低于应用包内版本。cron 下次触发（≤10 分钟）会自动验签同步；也可在 NAS 上重跑下方一键命令立即升级（命令幂等，可重复执行）。
       </p>

@@ -30,14 +30,28 @@ export type ExecutorStatusResult = {
   state: ExecutorState;
   status: ExecutorStatusFile | null;
   appVersion: string;
+  /** Present when status.json exists but cannot be read (for diagnostics). */
+  statusReadError?: string;
 };
 
 export async function readExecutorStatus(now = new Date()): Promise<ExecutorStatusResult> {
   let raw: string;
   try {
     raw = await readFile(getStatusFilePath(), "utf8");
-  } catch {
-    return { state: "undeployed", status: null, appVersion: APP_VERSION };
+  } catch (error) {
+    // ENOENT is the only condition that means "not deployed".  Permission,
+    // I/O, and path errors must remain visible to the UI/operator instead of
+    // being silently reported as a missing executor.
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") {
+      return { state: "undeployed", status: null, appVersion: APP_VERSION };
+    }
+    return {
+      state: "undeployed",
+      status: null,
+      appVersion: APP_VERSION,
+      statusReadError: code || "STATUS_READ_FAILED"
+    };
   }
 
   let parsed: unknown;

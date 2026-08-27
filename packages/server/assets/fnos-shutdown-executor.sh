@@ -15,7 +15,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 
 DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-}"
 EXEC_DIR=""
@@ -996,7 +996,6 @@ dry_run() {
     else
         printf '总体: 存在未通过项（真实运行不会关机）\n'
     fi
-    exit 0
 }
 
 # ================================================================
@@ -1005,10 +1004,11 @@ dry_run() {
 
 usage() {
     cat >&2 <<'EOF'
-用法: fnos-shutdown-executor.sh [--version|--dry-run]
+用法: fnos-shutdown-executor.sh [--version|--dry-run|--verify]
   （无参数）  主流程：root 由 cron 触发，持锁后按 config.json 窗口与检查项决定关机
   --version   输出 SCRIPT_VERSION 并退出（零副作用，任意用户）
   --dry-run   逐项打印十五项检查结果与实测值（不取锁、不写文件、绝不关机）
+  --verify    执行无副作用检查并立即写入部署心跳（绝不关机）
 EOF
 }
 
@@ -1055,6 +1055,21 @@ self_update() {
     exec "$self" "$@"
 }
 
+# Verify the installation and register a successful deployment immediately.
+# The dry-run checks never enter the poweroff path.
+verify() {
+    dry_run || exit 1
+    if ! init_data_paths; then
+        exit 1
+    fi
+    mkdir -p "$EXEC_DIR" || exit 1
+    chmod 755 "$EXEC_DIR" 2>/dev/null || true
+    local preserved
+    preserved=$(prev_action)
+    write_status "${preserved:-out_of_window}" false || exit 1
+    printf 'verified and deployed (SCRIPT_VERSION=%s)\n' "$SCRIPT_VERSION"
+}
+
 # ---------- §3.4 日志保留：仅保留最近 6 个月（含当月），每次触发清理 ----------
 prune_logs() {
     local cutoff f ym
@@ -1086,6 +1101,10 @@ main() {
     # DATA_DIR 不允许猜测。旧 cron 未传变量时先完成自更新，再 fail-safe 退出，等待用户重跑部署命令。
     init_data_paths || exit 0
     mkdir -p "$EXEC_DIR"
+    # The directory is created by the root cron process on first run.  Make it
+    # traversable by the app user so the app can read status.json/logs even when
+    # cron inherits a restrictive umask or the directory came from an older run.
+    chmod 755 "$EXEC_DIR" 2>/dev/null || true
     # §3.4 会话分隔标记：每次触发的首条日志，消息体以 "=== " 开头、" ===" 结尾（应用可按此分组）
     log_info "=== 触发执行（v$SCRIPT_VERSION）==="
 
@@ -1167,6 +1186,8 @@ case "${1:-}" in
         exit 0 ;;
     --dry-run)
         dry_run ;;
+    --verify)
+        verify ;;
     *)
         usage
         exit 3 ;;
