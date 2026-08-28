@@ -134,7 +134,7 @@
 | network | exclude_interfaces | string[] | 每项仅含 `[a-zA-Z0-9_*?-]`，≤32 字符 | 见示例 |
 | min_uptime | min_sec | int | 0–86400 | 1800 |
 | smb_sessions | （无参数） | — | — | — |
-| tcp_sessions | ports | int[] | 每项 1–65535，可空数组 | [] |
+| tcp_sessions | ports | int[] | 每项 1–65535，可空数组 | [8005, 5666, 5667, 443, 80] |
 | download_active | ports | int[] | 每项 1–65535，可空数组 | [] |
 | download_active | max_connections | int | 0–65535 | 0 |
 | vm_running | （无参数） | — | — | — |
