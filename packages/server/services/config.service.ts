@@ -53,7 +53,7 @@ export function defaultConfig(): ShutdownConfig {
       },
       min_uptime: { enabled: false, min_sec: 1800 },
       smb_sessions: { enabled: false },
-      tcp_sessions: { enabled: false, ports: [] },
+      tcp_sessions: { enabled: true, ports: [8005, 5666, 5667, 443, 80] },
       download_active: { enabled: false, ports: [], max_connections: 0 },
       vm_running: { enabled: false },
       process_running: { enabled: false, names: [] },

@@ -31,7 +31,7 @@ function defaultForm() {
     },
     minUptime: { enabled: false, minSec: "1800" },
     smbSessions: { enabled: false },
-    tcpSessions: { enabled: false, ports: "" },
+    tcpSessions: { enabled: true, ports: "8005, 5666, 5667, 443, 80" },
     downloadActive: { enabled: false, ports: "", maxConnections: "0" },
     vmRunning: { enabled: false },
     processRunning: { enabled: false, names: "" },
@@ -717,7 +717,7 @@ onMounted(() => {
           </div>
           <div class="check-params" :class="{ disabled: !form.tcpSessions.enabled }">
             <label class="param-label">端口列表（逗号分隔，1–65535；留空 = 直接通过）</label>
-            <input v-model="form.tcpSessions.ports" class="input" type="text" placeholder="8005, 5666" :disabled="!form.tcpSessions.enabled" />
+            <input v-model="form.tcpSessions.ports" class="input" type="text" placeholder="8005, 5666, 5667, 443, 80" :disabled="!form.tcpSessions.enabled" />
             <p v-if="fieldErrors['tcpSessions.ports']" class="field-error">{{ fieldErrors["tcpSessions.ports"] }}</p>
           </div>
         </article>
