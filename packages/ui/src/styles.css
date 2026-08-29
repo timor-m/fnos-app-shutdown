@@ -1171,26 +1171,47 @@ select.input {
 
 /* ---------- 保存栏 ---------- */
 
+.settings-page.has-save-bar {
+  padding-bottom: 84px;
+}
+
 .save-bar {
+  position: fixed;
+  left: 50%;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 45;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 12px;
+  width: min(1440px, calc(100% - 20px));
   padding: 12px 16px;
+  transform: translateX(-50%);
   border-radius: var(--r-lg);
   background: var(--bg-card);
   border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-lg);
   transition: background-color 0.18s ease, border-color 0.18s ease;
+}
+
+.save-toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 46;
+  padding: 10px 16px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
+  border-radius: var(--r-md);
+  background: var(--success-soft);
+  color: var(--success);
+  box-shadow: var(--shadow-lg);
+  font-size: 0.88rem;
+  white-space: nowrap;
 }
 
 .save-msg {
   font-size: 0.88rem;
-}
-
-.save-ok {
-  color: var(--success);
 }
 
 .dirty-hint {
@@ -1654,6 +1675,20 @@ select.input {
     padding: 14px 0 40px;
   }
 
+  .settings-page.has-save-bar {
+    padding-bottom: 126px;
+  }
+
+  .save-bar {
+    width: calc(100% - 16px);
+    flex-wrap: wrap;
+    padding: 10px 12px;
+  }
+
+  .save-msg {
+    flex: 1 0 100%;
+  }
+
   .topbar-inner {
     width: calc(100% - 16px);
     row-gap: 8px;
@@ -1714,7 +1749,7 @@ select.input {
   }
 
   .about-label {
-    width: 110px;
+    width: 80px;
   }
 
   .log-search .input {

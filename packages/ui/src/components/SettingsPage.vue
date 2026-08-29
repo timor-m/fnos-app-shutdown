@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ListChecks, RotateCcw, Settings2, Undo2 } from "lucide-vue-next";
 import { apiGet, apiSend, type ShutdownConfig } from "../api";
+import TimePicker from "./TimePicker.vue";
 
 const loading = ref(true);
 const loadError = ref("");
@@ -416,7 +417,7 @@ onMounted(() => {
     <button class="btn" type="button" @click="load">重试</button>
   </div>
 
-  <template v-else>
+  <div v-else class="settings-page" :class="{ 'has-save-bar': dirty }">
     <!-- 全局区 -->
     <section class="panel">
       <header class="panel-header">
@@ -452,24 +453,12 @@ onMounted(() => {
         <div class="field-inputs window-inputs">
           <label class="time-input-field">
             <span class="time-input-label">开始</span>
-            <input
-              v-model="form.windowStart"
-              class="input time-input"
-              type="time"
-              step="60"
-              aria-label="工作阶段开始时间"
-            />
+            <TimePicker v-model="form.windowStart" label="工作阶段开始时间" aria-label="工作阶段开始时间" />
           </label>
           <span class="time-range-separator" aria-hidden="true">至</span>
           <label class="time-input-field">
             <span class="time-input-label">结束</span>
-            <input
-              v-model="form.windowEnd"
-              class="input time-input"
-              type="time"
-              step="60"
-              aria-label="工作阶段结束时间"
-            />
+            <TimePicker v-model="form.windowEnd" label="工作阶段结束时间" aria-label="工作阶段结束时间" />
           </label>
         </div>
       </div>
@@ -858,10 +847,9 @@ onMounted(() => {
       </div>
     </section>
 
-    <div class="save-bar">
+    <div v-if="dirty" class="save-bar">
       <p v-if="saveError" class="field-error save-msg">{{ saveError }}</p>
-      <p v-else-if="saveOk" class="save-msg save-ok">已保存，最迟一个检查周期后生效。</p>
-      <span v-else-if="dirty" class="save-msg dirty-hint">
+      <span v-else class="save-msg dirty-hint">
         <span class="dirty-dot"></span>
         有未保存修改
       </span>
@@ -877,5 +865,6 @@ onMounted(() => {
         {{ saving ? "保存中..." : "保存设置" }}
       </button>
     </div>
-  </template>
+    <div v-if="saveOk" class="save-toast" role="status">已保存，最迟一个检查周期后生效。</div>
+  </div>
 </template>
