@@ -117,7 +117,6 @@ onBeforeUnmount(() => {
                 <button v-for="hour in hourOptions" :key="hour" type="button" :class="{ selected: hour === hours }" @click="choose('hour', hour)">{{ pad(hour) }}</button>
               </div>
             </div>
-            <b>:</b>
             <div class="time-picker-wheel">
               <span>分</span>
               <div ref="minuteWheel" class="time-wheel-scroll" @scroll="onWheelScroll('minute', $event)">
@@ -143,10 +142,9 @@ onBeforeUnmount(() => {
 .time-picker-header button:hover { background: var(--bg-hover); }
 .time-picker-header .confirm { color: var(--brand-text); }
 .time-picker-wheels { display: flex; align-items: center; gap: 8px; height: 220px; padding: 12px 24px; }
-.time-picker-wheels > b { align-self: center; color: var(--text-2); font-size: 1.2rem; }
-.time-picker-wheel { flex: 1; min-width: 0; text-align: center; }
+.time-picker-wheel { position: relative; flex: 1; min-width: 0; text-align: center; }
 .time-picker-wheel > span { display: block; margin-bottom: 4px; color: var(--text-3); font-size: .75rem; font-weight: 600; }
-.time-wheel-scroll { height: 172px; overflow-y: auto; overflow-x: hidden; scroll-snap-type: y mandatory; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-y; user-select: none; }
+.time-wheel-scroll { height: 172px; overflow-y: auto; overflow-x: hidden; padding-block: 66px; box-sizing: border-box; scroll-snap-type: y mandatory; scroll-padding-top: 66px; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-y; user-select: none; mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, .25) 20%, #000 38%, #000 62%, rgba(0, 0, 0, .25) 80%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0, 0, 0, .25) 20%, #000 38%, #000 62%, rgba(0, 0, 0, .25) 80%, transparent 100%); }
 .time-wheel-scroll::-webkit-scrollbar { display: none; }
 .time-wheel-scroll button { display: flex; align-items: center; justify-content: center; width: 100%; height: 40px; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 1.05rem; font-variant-numeric: tabular-nums; scroll-snap-align: start; cursor: pointer; }
 .time-wheel-scroll button.selected { color: var(--text-1); font-weight: 700; transform: scale(1.08); }
@@ -154,7 +152,7 @@ onBeforeUnmount(() => {
   .time-picker-layer { display: flex; align-items: flex-end; pointer-events: auto; touch-action: none; }
   .time-picker-panel { position: fixed; left: 0 !important; top: auto !important; width: 100% !important; border: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .time-picker-wheels { height: 250px; padding-inline: 60px; }
-  .time-wheel-scroll { height: 202px; }
+  .time-wheel-scroll { height: 202px; padding-block: 81px; scroll-padding-top: 81px; }
 }
 @media (prefers-reduced-motion: reduce) { .time-picker-panel { animation: none; } }
 </style>
