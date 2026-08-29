@@ -886,7 +886,7 @@ check_disk_scrub() {
 }
 
 check_host_online() {
-    local h up="" rc
+    local h up="" rc err
     if [ -z "$CFG_HOSTS" ]; then
         R_DETAIL="hosts 为空数组，无待检主机，视为通过"
         return 0
@@ -895,13 +895,20 @@ check_host_online() {
         R_STATUS=FAIL; R_DETAIL="ping 命令不可用"; return 1
     fi
     for h in $CFG_HOSTS; do
-        ping -c 1 -W 1 "$h" >/dev/null 2>&1
+        # stderr 收入变量（首行写入 R_DETAIL），否则 rc>=2 时无法分辨权限/路由/解析失败
+        err=$(ping -c 1 -W 1 "$h" 2>&1 >/dev/null)
         rc=$?
+        err=$(printf '%s\n' "$err" | head -n 1)
         case $rc in
             0) up="$up $h" ;;
             1) : ;;   # 不可达
-            *) # rc>=2：socket 权限不足等执行错误，测量失败 fail-safe（防误判全部离线而误关机）
-               R_STATUS=FAIL; R_DETAIL="ping $h 执行错误（rc=$rc，缺 cap_net_raw/setuid？请重跑部署命令）"; return 1 ;;
+            *) # rc>=2：执行错误（非不可达），测量失败 fail-safe（防误判全部离线而误关机）
+               # cron 主流程以 root 运行，自带 CAP_NET_RAW，与 setcap 无关；
+               # 只有应用用户身份的 dry-run 才可能缺权限
+               if [ "$(id -u)" = "0" ]; then
+                   R_STATUS=FAIL; R_DETAIL="ping $h 执行错误（rc=$rc${err:+：$err}）— 请检查目标地址是否与本机同网段、路由是否可达"; return 1
+               fi
+               R_STATUS=FAIL; R_DETAIL="ping $h 执行错误（rc=$rc${err:+：$err}，缺 cap_net_raw/setuid？请重跑部署命令）"; return 1 ;;
         esac
     done
     if [ -z "$up" ]; then
