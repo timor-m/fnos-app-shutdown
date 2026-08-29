@@ -22,8 +22,8 @@ curl -fsSL "$U" -o /tmp/fnos-shutdown-executor.sh \\
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
   && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
   && PING_BIN="$(command -v ping)" \\
-  && sudo setcap cap_net_raw+ep "$PING_BIN" \\
-  && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && if ! sudo setcap cap_net_raw+ep "$PING_BIN"; then echo '错误：setcap 失败；请确认管理员权限和 ping 所在文件系统支持扩展属性' >&2; exit 1; fi \\
+  && if ! sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null; then echo '错误：低权限 ping 验证失败；请确认 ping capability 已生效且应用用户存在' >&2; exit 1; fi \\
   && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
@@ -40,8 +40,8 @@ test -d "$D" \\
   && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
   && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
   && PING_BIN="$(command -v ping)" \\
-  && sudo setcap cap_net_raw+ep "$PING_BIN" \\
-  && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null \\
+  && if ! sudo setcap cap_net_raw+ep "$PING_BIN"; then echo '错误：setcap 失败；请确认管理员权限和 ping 所在文件系统支持扩展属性' >&2; exit 1; fi \\
+  && if ! sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null; then echo '错误：低权限 ping 验证失败；请确认 ping capability 已生效且应用用户存在' >&2; exit 1; fi \\
   && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
