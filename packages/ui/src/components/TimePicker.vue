@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
 .time-picker-trigger svg { flex: 0 0 auto; color: var(--text-3); }
 .time-picker-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .time-picker-layer { position: fixed; inset: 0; z-index: 140; background: rgba(0, 0, 0, .35); pointer-events: none; }
-.time-picker-panel { position: fixed; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg); pointer-events: auto; }
+.time-picker-panel { position: fixed; overflow: hidden; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg); pointer-events: auto; touch-action: none; }
 .time-picker-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .time-picker-header button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--text-2); cursor: pointer; }
 .time-picker-header button:hover { background: var(--bg-hover); }
@@ -146,12 +146,12 @@ onBeforeUnmount(() => {
 .time-picker-wheels > b { align-self: center; color: var(--text-2); font-size: 1.2rem; }
 .time-picker-wheel { flex: 1; min-width: 0; text-align: center; }
 .time-picker-wheel > span { display: block; margin-bottom: 4px; color: var(--text-3); font-size: .75rem; font-weight: 600; }
-.time-wheel-scroll { height: 172px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.time-wheel-scroll { height: 172px; overflow-y: auto; overflow-x: hidden; scroll-snap-type: y mandatory; overscroll-behavior: contain; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-y; user-select: none; }
 .time-wheel-scroll::-webkit-scrollbar { display: none; }
 .time-wheel-scroll button { display: flex; align-items: center; justify-content: center; width: 100%; height: 40px; padding: 0; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 1.05rem; font-variant-numeric: tabular-nums; scroll-snap-align: start; cursor: pointer; }
 .time-wheel-scroll button.selected { color: var(--text-1); font-weight: 700; transform: scale(1.08); }
 @media (max-width: 760px) {
-  .time-picker-layer { display: flex; align-items: flex-end; pointer-events: auto; }
+  .time-picker-layer { display: flex; align-items: flex-end; pointer-events: auto; touch-action: none; }
   .time-picker-panel { position: fixed; left: 0 !important; top: auto !important; width: 100% !important; border: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; padding-bottom: env(safe-area-inset-bottom); }
   .time-picker-wheels { height: 250px; padding-inline: 60px; }
   .time-wheel-scroll { height: 202px; }
