@@ -1,6 +1,8 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.11 · 2026-08-24（§9 部署时直接为系统 `ping` 设置 `CAP_NET_RAW`，修复低权限检测 rc=2）
+> 版本：v0.12 · 2026-09-04（CPU 改用 `/proc/stat` 采样；§9 增加严格限定的 root dry-run sudo 白名单）
+>
+> 历史：v0.11 · 2026-08-24（§9 部署时直接为系统 `ping` 设置 `CAP_NET_RAW`，修复低权限检测 rc=2）
 >
 > 历史：v0.10 · 2026-08-24（取消所有数据目录猜测；`FNOS_SHUTDOWN_DATA_DIR` 缺失或无效时执行器安全退出）
 >
@@ -60,7 +62,7 @@
 
 1. executor **永不写** `config.json`、`skip.json`；应用**永不写** `data/executor/` 内任何文件
 2. 应用**不得解析日志内容**（§3.4），只做原文展示；结构化状态一律走 `status.json`
-3. 应用不得尝试 `sudo`、写 crontab、调 polkit——部署执行器只能引导用户手动完成（§9）
+3. 除调用 §4.1 的无参数 `--privileged-dry-run` 固定入口外，应用不得尝试 `sudo`、写 crontab、调 polkit；sudoers、cron 与数据目录锚定文件只能由管理员按 §9 手动部署
 4. executor 只能在 `FNOS_SHUTDOWN_DATA_DIR` 指定的数据根目录内访问契约文件，不得遍历或读取其他用户数据目录；该根目录可合法位于 `/vol2`、`/vol3` 等应用实际安装卷
 5. executor 解析配置**禁止** `source`/eval 任何契约文件内容，必须白名单字段解析（§3.1 校验列）
 6. executor **不得执行任何外部脚本/钩子/命令拼接**——能力集合封闭（§4.6、§12-D1）
@@ -255,6 +257,11 @@
 | （无参数） | 正常执行主流程 | root（cron） |
 | `--version` | 输出 SCRIPT_VERSION 并退出。**零副作用**：不取锁、不读写任何文件、不检查系统 | 任意用户 |
 | `--dry-run` | 跑一遍完整检查逻辑并把每项检查结果打印到 stdout，**绝不写 status/log、绝不关机** | 任意用户（联调用） |
+| `--privileged-dry-run` | 仅从 root 所有的 `/etc/fnos-shutdown-data-dir` 读取数据目录后执行 dry-run；不接受参数或调用方环境中的数据目录 | root；仅允许应用用户通过 §9 精确 sudoers 规则调用 |
+| `--verify` | 跑一遍无副作用检查并写入部署心跳 | root（兼容旧部署流程） |
+| `--install <数据目录>` | 幂等安装执行器、cron、root-only 数据目录锚点、精确 sudoers 规则和 ping capability，并完成权限验证 | root（管理员显式调用） |
+| `--verify-installation` | 校验已安装文件及权限，并以应用用户实际调用固定特权 dry-run 后写入部署心跳 | root（管理员显式调用） |
+| `--uninstall` | 移除执行器、cron、数据目录锚点和 sudoers 规则；保留系统 ping capability | root（管理员显式调用） |
 | 其他参数 | 打印用法，退出码 3 | — |
 
 ### 4.2 退出码
@@ -304,7 +311,7 @@ write_status(max_rounds_reached); exit 0
 
 | 检查项 | 实现 | 通过条件 |
 |---|---|---|
-| cpu | `/proc/loadavg` 第 2 字段 ÷ 核数 × 100 | ≤ max_percent |
+| cpu | `/proc/stat` 两次采样差计算非 idle/iowait 时间占比 | ≤ max_percent |
 | load | load1、load5 均 < 核数 × max_per_core | 同时满足 |
 | users | `who` 去除 root 后计数 | ≤ max_active |
 | ssh | `ss -tnH`，对 ports 每端口统计 ESTABLISHED | 全部为 0 |
@@ -322,7 +329,7 @@ write_status(max_rounds_reached); exit 0
 
 - `enabled=false` 的检查项直接视为通过，不执行任何采样
 - **测量失败视为不通过（fail-safe）**：如 smbstatus 不存在、`/proc/uptime` 不可读等，该检查项按不通过处理并记警告，绝不因测量失败而误关机
-- 历史缺陷对应：禁用 `netstat` 改用 `ss`（原脚本 grep `:22` 永远匹配不到 8975）；网络统计排除 lo/容器网桥（原本机服务互访误判有活动）；executor 文件 `root:root 700`（原脚本可被普通用户改写，属提权路径）；部署时为系统 `ping` 设置 `CAP_NET_RAW`，避免低权限 dry-run 返回 rc=2
+- 历史缺陷对应：禁用 `netstat` 改用 `ss`（原脚本 grep `:22` 永远匹配不到 8975）；网络统计排除 lo/容器网桥（原本机服务互访误判有活动）；CPU 使用率采样 `/proc/stat`（原 load5 折算可超过 100%）；executor 文件 `root:root 700`（原脚本可被普通用户改写，属提权路径）；部署时为系统 `ping` 设置 `CAP_NET_RAW`，避免低权限 dry-run 返回 rc=2
 
 ### 4.6 预设动作清单（能力封闭集合）
 
@@ -411,6 +418,7 @@ C. 动作类
 | GET | `/api/logs?month=YYYY-MM` | 列举/读取 EXEC_DIR 日志，原文返回，分页 |
 | GET | `/api/executor/script` | 返回包内脚本原始字节（§3.5） |
 | GET | `/api/executor/status` | §3.3 四态判定结果 + status.json 原文 |
+| GET | `/api/checks/dry-run` | 已部署时经精确 sudoers 规则调用 `--privileged-dry-run`；未部署/规则不可用时回退应用用户 `--dry-run`，并返回 `executionMode` |
 
 UI 三页：
 
@@ -420,42 +428,37 @@ UI 三页：
 
 ## 9. 部署命令规约（UI 一字不差展示）
 
-**v1.0.1 起**：本命令除首次部署与手动修复外，还负责把实际数据目录写入 cron，并为系统 `ping` 设置 `CAP_NET_RAW`。由低于 v1.0.1 的版本升级时必须重新执行一次；之后执行器版本仍可经 §3.6 签名自更新。
+**v1.0.6 起**：本命令除首次部署与手动修复外，还负责把实际数据目录分别写入 cron 与 root-only 锚定文件、为系统 `ping` 设置 `CAP_NET_RAW`，并安装一条仅允许应用用户执行固定 `--privileged-dry-run` 的 sudoers 规则。由更低版本升级时必须重新执行一次；之后执行器版本仍可经 §3.6 签名自更新。
 
 一键部署/修复（幂等，可重复执行）：
 
 ```bash
-curl -fsSL "http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script" -o /tmp/fnos-shutdown-executor.sh \
-  && DATA_DIR=<数据目录> \
-  && test -d "$DATA_DIR" \
-  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh /usr/local/sbin/ \
-  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q /usr/local/sbin/fnos-shutdown-executor.sh\n' "$DATA_DIR" | sudo tee /etc/cron.d/fnos-shutdown \
-  && PING_BIN="$(command -v ping)" \
-  && sudo setcap cap_net_raw+ep "$PING_BIN" \
-  && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null \
-  && rm -f /tmp/fnos-shutdown-executor.sh
+(
+D=<数据目录>
+U="http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script"
+T="$(mktemp)" || exit 1
+trap 'rm -f "$T"' EXIT
+
+curl -fsSL "$U" -o "$T" \
+  && sudo bash "$T" --install "$D"
+)
 ```
 
-`<数据目录>` 由 About API 返回当前进程的 `STORAGE_DIR`（即 `${TRIM_PKGVAR}/data`），UI 使用 Shell 安全引用后替换。cron 中用 Bash `printf %q` 转义该值。部署命令直接对 `command -v ping` 返回的系统 ping 执行 `sudo setcap cap_net_raw+ep`，随后以应用用户 ping 本机验证权限。`setcap` 由 `sudo` 的 secure path 查找，不使用普通 SSH 用户的 `PATH` 预检。
+`<数据目录>` 由 About API 返回当前进程的 `STORAGE_DIR`（即 `${TRIM_PKGVAR}/data`），UI 使用 Shell 安全引用后替换。下载到完整临时文件后才由管理员通过 sudo 调用；`--install` 内部负责原子安装与逐步报错，所有授权步骤均保留。cron 中用 Bash `printf %q` 转义数据目录。特权 dry-run 不接受参数或调用方环境中的数据目录，只读取 `root:root 600` 的 `/etc/fnos-shutdown-data-dir`；sudoers 命令行无通配符，因此应用不能借管理入口执行安装、卸载、主流程或其他 root 命令。
 
 验证：
 
 ```bash
-DATA_DIR=<数据目录> \
-  && test -d "$DATA_DIR" \
-  && PING_BIN="$(command -v ping)" \
-  && sudo getcap "$PING_BIN" \
-  && sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 \
-  && sudo env FNOS_SHUTDOWN_DATA_DIR="$DATA_DIR" /usr/local/sbin/fnos-shutdown-executor.sh --dry-run
+sudo /usr/local/sbin/fnos-shutdown-executor.sh --verify-installation
 ```
 
 说明：命令经 SSH 在 NAS 本机执行，使用仅绑定 `127.0.0.1` 的本机服务端口（安装/设置向导配置，默认 8366；0=未启用时需先配置或使用备选方式）；直连端口不对局域网开放，外部访问必须经过 fnOS 网关。
-备选（直连端口未启用时）：UI 复制脚本全文 → 存为 `/tmp/fnos-shutdown-executor.sh` → 执行上面 `sudo install` 起的后半段。
+备选（直连端口未启用时）：UI 复制脚本全文 → 存为 `/tmp/fnos-shutdown-executor.sh` → 执行 `sudo bash /tmp/fnos-shutdown-executor.sh --install <数据目录>`。
 
 卸载执行器（应用卸载不自动执行，仅供用户手动）：
 
 ```bash
-sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown
+sudo /usr/local/sbin/fnos-shutdown-executor.sh --uninstall
 ```
 
 卸载不清除系统 ping 的 capability，因为它可能在安装本应用前已由系统或管理员配置。
@@ -484,6 +487,8 @@ sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown
 讨论中曾考虑让 executor 成为通用高权限脚本执行器、由 UI 配置生成脚本。否决理由：低权限应用若能导致 root 执行任意代码，则应用后端任一漏洞、或任何被授权打开该应用 UI 的家庭成员，都等价于 NAS root 权限——安全模型从"应用被攻破 = 乱关机"塌缩为"应用被攻破 = 整机失陷"。结论：executor 能力为封闭预设集合（§4.6），UI 只能配置开关与阈值参数；可执行内容过界必须经管理员交互式 sudo（即 executor 自身的部署流程）。未来新需求一律走「新增预设检查项 + 可选配置字段」的扩展路径。
 
 **D1 补充（2026-08-12，v0.7）**：曾评估两条免手动升级路径——① 执行器从包内脚本目录直接自更新：否决，该目录为应用用户可写，应用被攻破即可替换脚本获 root；② 应用 run-as=root + 生命周期回调部署：可行但第三方 root 包无法上架商店。采纳③ **签名自更新（§3.6）**：信任锚为 sudo 首次部署时锚定的内嵌公钥，应用可写的脚本+签名文件无私钥无法伪造，安全模型不塌缩，升级全自动。
+
+**D1 补充（2026-09-04，v0.12）**：fnOS 真机确认 `smbstatus`、系统 libvirt 与 Btrfs scrub 状态只能由 root 准确读取，因此低权限 UI dry-run 会产生假失败。采纳精确 sudoers 入口：应用只能无参数调用 root 所有、签名更新的执行器 `--privileged-dry-run`；数据目录只从 `/etc/fnos-shutdown-data-dir`（root:root 600）读取。规则不允许调用方传参、设置环境或进入关机主流程，保持能力封闭。
 
 **D2 · v2 检查项选型与 network 语义修订**（2026-08-12 定）
 结合目标机器实测（smbd 常驻、md127 RAID1、btrfs、qBittorrent/aria2/frpc 运行中、libvirtd 无 VM、upsd 未运行），从 §4.6 候选目录升格首批 v2 检查项：`smb_sessions`（家人拷贝文件场景）、`tcp_sessions`（ssh 泛化，覆盖媒体 8005/网关 5666 等）、`download_active`（ss 连接计数，刻意避开需凭证的 WebUI API）、`min_uptime`（防 WoL/定时唤醒后立即被关机的抖动场景，`/proc/uptime` 零成本）。同时修订两处 v1 遗留：`network` 速率单位明确为 **KiB/s**（字段名 max_*_kbps 语义，v1 实现已按此执行，契约原文未写明）；§4.3 伪代码 `write_status(triggered)` 的 `triggered` 非 last_action 枚举值，仅表"入口写"语义（v1 实现已按此执行）。`network.max_tx_kbps` 以「可选字段、默认 0=不启用」加入，旧 executor 忽略后行为不变，满足 §7。

@@ -84,6 +84,7 @@
 - 创建每 10 分钟运行一次的 cron 任务
 - 自动把应用实际数据目录写入 `FNOS_SHUTDOWN_DATA_DIR`
 - 为系统 `ping` 设置 `CAP_NET_RAW`，使低权限应用用户可以执行主机在线检查
+- 安装仅允许固定 `--privileged-dry-run` 的 sudoers 规则，使手动检测能读取 SMB、虚拟机和 Btrfs scrub 状态
 
 部署完成后，可以在「验证部署结果」中运行 dry-run。首次部署后等待 cron 触发，部署状态变为“正常”。
 
@@ -139,7 +140,7 @@ sudo setcap cap_net_raw+ep "$(command -v ping)"
 
 ### Q5：SMB 检查提示 `smbstatus --processes 执行失败` 是故障吗？
 
-执行器由 root 通过 cron 运行，正常部署后 SMB 检查应由 root 执行。若只是普通用户手动运行 `smbstatus --processes`，出现权限错误属于预期现象。请查看应用里的执行器日志或使用部署页的 dry-run，不要用普通用户结果判断 cron 是否正常。
+执行器由 root 通过 cron 运行，正常部署后 SMB 检查应由 root 执行。若只是普通用户手动运行 `smbstatus --processes`，出现权限错误属于预期现象。升级到 v1.0.6 后请在部署页重新执行一键部署命令，状态页的手动检测将通过严格限定的 root dry-run 入口读取结果；未部署时页面会明确提示当前仍是低权限检测。
 
 ### Q6：应用安装在 `/vol2`，部署状态一直不正常怎么办？
 

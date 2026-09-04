@@ -10,42 +10,25 @@ function shellQuote(value: string) {
   return `'${value.replaceAll("'", `'\"'\"'`)}'`;
 }
 
-// ---------- §9 命令（变量化展示，执行步骤保持不变） ----------
+// ---------- §9 命令（变量化展示） ----------
 // 命令经 SSH 在 NAS 本机执行：用 127.0.0.1 + 应用直连端口（wizard 配置），
 // 绕开网关注销态校验与域名回环（hairpin）问题
-const DEPLOY_COMMAND_TEMPLATE = `D=<数据目录>
-S='/usr/local/sbin/fnos-shutdown-executor.sh'
+const DEPLOY_COMMAND_TEMPLATE = `(
+D=<数据目录>
 U="http://127.0.0.1:<直连端口>/app/fnos-app-shutdown/api/executor/script"
+T="$(mktemp)" || exit 1
+trap 'rm -f "$T"' EXIT
 
-curl -fsSL "$U" -o /tmp/fnos-shutdown-executor.sh \\
-  && test -d "$D" \\
-  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
-  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
-  && PING_BIN="$(command -v ping)" \\
-  && if ! sudo setcap cap_net_raw+ep "$PING_BIN"; then echo '错误：setcap 失败；请确认管理员权限和 ping 所在文件系统支持扩展属性' >&2; exit 1; fi \\
-  && if ! sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null; then echo '错误：低权限 ping 验证失败；请确认 ping capability 已生效且应用用户存在' >&2; exit 1; fi \\
-  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
+curl -fsSL "$U" -o "$T" \\
+  && sudo bash "$T" --install "$D"
+)`;
+
+const VERIFY_COMMAND_TEMPLATE = `sudo /usr/local/sbin/fnos-shutdown-executor.sh --verify-installation`;
+
+const MANUAL_INSTALL_COMMAND_TEMPLATE = `sudo bash /tmp/fnos-shutdown-executor.sh --install <数据目录> \\
   && rm -f /tmp/fnos-shutdown-executor.sh`;
 
-const VERIFY_COMMAND_TEMPLATE = `D=<数据目录>
-S='/usr/local/sbin/fnos-shutdown-executor.sh'
-
-test -d "$D" \\
-  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify`;
-
-const MANUAL_INSTALL_COMMAND_TEMPLATE = `D=<数据目录>
-S='/usr/local/sbin/fnos-shutdown-executor.sh'
-
-test -d "$D" \\
-  && sudo install -m 700 -o root -g root /tmp/fnos-shutdown-executor.sh "$S" \\
-  && printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %s\\n' "$D" "$S" | sudo tee /etc/cron.d/fnos-shutdown \\
-  && PING_BIN="$(command -v ping)" \\
-  && if ! sudo setcap cap_net_raw+ep "$PING_BIN"; then echo '错误：setcap 失败；请确认管理员权限和 ping 所在文件系统支持扩展属性' >&2; exit 1; fi \\
-  && if ! sudo -u fnos-app-shutdown "$PING_BIN" -c 1 -W 1 127.0.0.1 >/dev/null; then echo '错误：低权限 ping 验证失败；请确认 ping capability 已生效且应用用户存在' >&2; exit 1; fi \\
-  && sudo env FNOS_SHUTDOWN_DATA_DIR="$D" "$S" --verify \\
-  && rm -f /tmp/fnos-shutdown-executor.sh`;
-
-const UNINSTALL_COMMAND = `sudo rm -f /usr/local/sbin/fnos-shutdown-executor.sh /etc/cron.d/fnos-shutdown`;
+const UNINSTALL_COMMAND = `sudo /usr/local/sbin/fnos-shutdown-executor.sh --uninstall`;
 
 /** 应用直连端口（关于接口）；null = 未启用，一键命令退化为占位符并提示 */
 const servicePort = ref<number | null>(null);
@@ -160,10 +143,10 @@ onMounted(() => {
         无法读取执行器状态文件（{{ status.executor.statusReadError }}）。请检查应用数据目录与 executor 目录权限；版本号验证成功不代表状态文件可读。
       </p>
       <p v-if="status.executor.state === 'outdated'" class="badge-hint warn">
-        执行器脚本版本低于应用包内版本。cron 下次触发（≤10 分钟）会自动验签同步；也可在 NAS 上重跑下方一键命令立即升级（命令幂等，可重复执行）。
+        执行器版本较旧，将在下次 cron 触发时自动更新；也可重跑一键命令立即升级。
       </p>
       <p v-else-if="status.executor.state === 'undeployed'" class="badge-hint">
-        在 NAS 上通过 SSH 执行下方一键命令完成部署；部署后 cron 最迟 10 分钟内首次触发，此处转为「正常」。
+        请通过 SSH 执行下方命令完成部署。
       </p>
     </section>
 
@@ -174,25 +157,22 @@ onMounted(() => {
           <ListOrdered :size="18" />
           部署步骤
         </h2>
-        <span>命令幂等，可重复执行</span>
+        <span>部署脚本仅首次需要手动执行</span>
       </header>
 
       <div class="steps">
         <div class="step">
           <span class="step-num">1</span>
           <div class="step-body">
-            <p class="step-title">复制一键命令（首次部署 / 手动修复）</p>
+            <p class="step-title">复制部署命令</p>
             <p class="field-desc">
-              命令会从本应用下载执行器脚本（127.0.0.1 直连端口，免网关注销态）、安装到 <code>/usr/local/sbin/</code> 并写入 cron（每 10 分钟触发一次）。
-              cron 会显式携带当前应用数据目录 <code>{{ dataDir || "未检测到" }}</code>，因此应用安装在任意存储卷都能与执行器共享配置和状态。
-              同时通过 <code>sudo setcap cap_net_raw+ep "$(command -v ping)"</code> 为系统 ping 授予原始套接字能力，使低权限应用用户也能执行「主机在线」检测；不会授予应用 root 权限。
-              首次部署后，应用升级时执行器会自动验签同步新版（§3.6），无需再跑命令。
+              安装执行器，并配置 cron 和必要的 sudo 检测权限。
             </p>
             <p v-if="servicePort === null" class="badge-hint warn">
-              未检测到直连端口：请在应用设置（向导）中配置服务端口后刷新本页，或使用下方「复制脚本全文」方式部署。
+              未检测到服务端口，请先完成端口配置或使用下方手动安装方式。
             </p>
             <p v-if="dataDir === null" class="badge-hint warn">
-              未检测到应用数据目录：请刷新本页后重试，不要执行仍含有 <code>&lt;数据目录&gt;</code> 占位符的命令。
+              未检测到应用数据目录，请刷新后重试。
             </p>
             <div class="cmd-block">
               <div class="cmd-block-head">
@@ -219,7 +199,7 @@ onMounted(() => {
           <div class="step-body">
             <p class="step-title">SSH 登录 NAS 执行</p>
             <p class="field-desc">
-              通过 SSH 登录 NAS，粘贴并执行上面复制的命令。安装完成后 cron 最迟 10 分钟内首次触发执行器。
+              登录 NAS 后粘贴执行，并按提示输入 sudo 密码。
             </p>
           </div>
         </div>
@@ -229,7 +209,7 @@ onMounted(() => {
           <div class="step-body">
             <p class="step-title">验证部署结果</p>
             <p class="field-desc">
-              执行以下命令，先验证应用用户可 ping 本机，再以 root 进行一次无副作用检测。输出的版本应为 {{ status.executor.appVersion }}，<code>DATA_DIR</code> 应为 <code>{{ dataDir || "实际应用数据目录" }}</code>。
+              检查安装和权限配置；显示“部署验证通过”即完成。
             </p>
             <div class="cmd-block">
               <div class="cmd-block-head">
@@ -260,11 +240,10 @@ onMounted(() => {
           <Wrench :size="18" />
           备选方案：手动安装脚本
         </h2>
-        <span>网关鉴权导致一键命令 curl 失败时使用</span>
+        <span>一键命令不可用时使用</span>
       </header>
       <p class="field-desc block-desc">
-        点击下方「复制脚本全文」，在 NAS 上将内容保存为 <code>/tmp/fnos-shutdown-executor.sh</code>，
-        然后执行以下命令完成安装（与一键命令的后半段相同）：
+        将脚本保存为 <code>/tmp/fnos-shutdown-executor.sh</code>，再执行安装命令。
       </p>
       <div class="actions-row">
         <button class="btn primary" type="button" :disabled="scriptLoading" @click="copyScript">
@@ -303,7 +282,7 @@ onMounted(() => {
         <span>手动操作</span>
       </header>
       <p class="field-desc block-desc">
-        卸载本应用<strong>不会</strong>自动移除执行器；如需移除，请在 NAS 上手动执行。命令会同时移除 ICMP 配置并恢复部署前的允许 GID 范围：
+        应用卸载后，如需清理执行器和相关授权，请手动执行：
       </p>
       <div class="cmd-block">
         <div class="cmd-block-head">

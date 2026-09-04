@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 关机条件检测结果（dry-run 六项） -->
+      <!-- 关机条件检测结果（dry-run 十五项） -->
       <div v-if="showCheck" class="checkrun">
         <div class="checkrun-head">
           <template v-if="checkRunning">
@@ -365,7 +365,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <p v-if="checkError" class="checkrun-error">{{ checkError }}</p>
-        <div v-else-if="checkResult" class="checkrun-list">
+        <p
+          v-else-if="checkResult?.executionMode === 'unprivileged'"
+          class="badge-hint warn status-hint"
+        >
+          当前为低权限检测；SMB、虚拟机和 Btrfs 清洗可能因权限显示失败。请到部署页重新执行一键部署命令，以获得与 root 执行器一致的结果。
+        </p>
+        <div v-if="checkResult" class="checkrun-list">
           <div v-for="c in checkResult.checks" :key="c.name" class="checkrun-item">
             <component :is="RESULT_ICON[c.result]" :size="15" :class="RESULT_CLASS[c.result]" />
             <span class="checkrun-name">{{ CHECK_NAME_ZH[c.name] || c.name }}</span>

@@ -510,7 +510,7 @@ onMounted(() => {
           <div class="check-head">
             <div class="field-main">
               <label class="field-label">CPU 使用率</label>
-              <p class="field-desc">负载折算的 CPU 使用率不高于上限才通过。</p>
+              <p class="field-desc">实时采样的 CPU 使用率不高于上限才通过。</p>
             </div>
             <div class="check-head-right">
               <span class="check-state">{{ form.cpu.enabled ? "已启用" : "已停用" }}</span>

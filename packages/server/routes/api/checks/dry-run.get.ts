@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { defineEventHandler, setResponseStatus } from "h3";
 import { ok, fail } from "../../../utils/api-response";
 import { resolveExecutorScriptPath } from "../../../services/executor.service";
@@ -35,15 +36,13 @@ const OVERALL_LINE_RE = /^总体: /m;
 
 const EXEC_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
+const INSTALLED_EXECUTOR = "/usr/local/sbin/fnos-shutdown-executor.sh";
 
-function runDryRun(scriptPath: string): Promise<string> {
+function execDryRun(command: string, args: string[], env = process.env): Promise<string> {
   return new Promise((resolve, reject) => {
-    // DATA_DIR 对齐应用自身数据根：生产 STORAGE_DIR 即契约 DATA_DIR，
-    // dev 回退 <cwd>/data，使 dry-run 读到的 config/skip 与页面一致。
-    const env = { ...process.env, FNOS_SHUTDOWN_DATA_DIR: getDataDir() };
     execFile(
-      "bash",
-      [scriptPath, "--dry-run"],
+      command,
+      args,
       { timeout: EXEC_TIMEOUT_MS, maxBuffer: MAX_OUTPUT_BYTES, env },
       (err, stdout, stderr) => {
         if (err) {
@@ -58,6 +57,27 @@ function runDryRun(scriptPath: string): Promise<string> {
       }
     );
   });
+}
+
+async function runDryRun(scriptPath: string): Promise<{
+  stdout: string;
+  executionMode: "privileged" | "unprivileged";
+}> {
+  // 部署完成后，sudoers 只允许这一条无参数固定命令。数据目录由 root:root 600
+  // 的 /etc/fnos-shutdown-data-dir 提供，应用不能通过参数或环境变量改变 root 读取范围。
+  if (existsSync(INSTALLED_EXECUTOR)) {
+    try {
+      const stdout = await execDryRun("sudo", ["-n", INSTALLED_EXECUTOR, "--privileged-dry-run"]);
+      return { stdout, executionMode: "privileged" };
+    } catch {
+      // 未重新部署 sudoers、旧执行器不认识新参数等场景保持功能可用；UI 会明确标记
+      // 低权限模式，避免把 SMB/libvirt/btrfs 的权限失败误认为真实 cron 结果。
+    }
+  }
+
+  const env = { ...process.env, FNOS_SHUTDOWN_DATA_DIR: getDataDir() };
+  const stdout = await execDryRun("bash", [scriptPath, "--dry-run"], env);
+  return { stdout, executionMode: "unprivileged" };
 }
 
 interface ParsedCheck {
@@ -102,8 +122,9 @@ export default defineEventHandler(async (event) => {
   }
 
   let stdout: string;
+  let executionMode: "privileged" | "unprivileged";
   try {
-    stdout = await runDryRun(scriptPath);
+    ({ stdout, executionMode } = await runDryRun(scriptPath));
   } catch (err) {
     setResponseStatus(event, 502);
     return fail(err instanceof Error ? err.message : "dry-run 执行失败");
@@ -111,7 +132,7 @@ export default defineEventHandler(async (event) => {
 
   try {
     const { overall, checks } = parseDryRunOutput(stdout);
-    return ok({ overall, checks, ranAt: toLocalIso(new Date()) });
+    return ok({ overall, checks, executionMode, ranAt: toLocalIso(new Date()) });
   } catch (err) {
     setResponseStatus(event, 502);
     return fail(err instanceof Error ? err.message : "dry-run 输出解析失败");

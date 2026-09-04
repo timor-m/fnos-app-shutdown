@@ -203,6 +203,7 @@ export interface DryRunCheck {
 export interface DryRunData {
   overall: "pass" | "fail";
   checks: DryRunCheck[];
+  executionMode: "privileged" | "unprivileged";
   ranAt: string;
 }
 

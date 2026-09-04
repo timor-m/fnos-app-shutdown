@@ -1,7 +1,7 @@
 #!/bin/bash
 # fnos-shutdown-executor.sh — fnOS「智能关机」root 执行器
 #
-# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.11
+# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.12
 #   §3.0–§3.4 文件接口 / §4.1–§4.6 行为规约 / §6 错误处理矩阵
 #
 # 测试钩子（未列入契约，仅供本机开发联调；默认值与契约 §3.0 一致）：
@@ -15,7 +15,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.5"
+SCRIPT_VERSION="1.0.6"
 
 DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-}"
 EXEC_DIR=""
@@ -23,6 +23,11 @@ CONFIG_FILE=""
 SKIP_FILE=""
 STATUS_FILE=""
 LOCK_FILE="${FNOS_SHUTDOWN_LOCK_FILE:-/run/fnos-shutdown.lock}"
+PRIVILEGED_DATA_DIR_FILE="/etc/fnos-shutdown-data-dir"
+INSTALLED_EXECUTOR="/usr/local/sbin/fnos-shutdown-executor.sh"
+SUDOERS_FILE="/etc/sudoers.d/fnos-shutdown-dry-run"
+CRON_FILE="/etc/cron.d/fnos-shutdown"
+APP_USER="fnos-app-shutdown"
 
 # §3.6 签名自更新：cron root 触发时对比包内脚本版本，验签通过才原子替换自身。
 # 信任锚 = 首次 sudo 部署时锚定的内嵌公钥；包内脚本+签名应用用户可写，无私钥无法伪造。
@@ -68,6 +73,7 @@ DEF_HOST_EN=false; DEF_HOSTS=""
 DEF_CAL_EN=false;  DEF_CAL_WEEKDAYS=""; DEF_CAL_DATES=""
 
 NET_SAMPLE_SEC=1   # network 检查两次采样间隔（秒）
+CPU_SAMPLE_SEC=1   # CPU 使用率通过 /proc/stat 两次采样差计算
 # 单位说明：契约 v0.5 §4.5 已明确速率为 KiB/s，与字段名 kbps(kilo-bytes/s) 语义一致，
 # 即 rate = (sum2-sum1)/NET_SAMPLE_SEC/1024；max_tx_kbps=0 时不启用 TX 判定。
 
@@ -598,15 +604,39 @@ get_cores() {
     printf '%s' "$c"
 }
 
+read_cpu_counters() {
+    local label user nice system idle iowait irq softirq steal guest guest_nice total idle_all value
+    read -r label user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat || return 1
+    [ "$label" = cpu ] || return 1
+    for value in "$user" "$nice" "$system" "$idle" "$iowait" "$irq" "$softirq" "$steal"; do
+        is_int "$value" || return 1
+    done
+    # guest/guest_nice 已包含在 user/nice 中，不重复计入总时间。
+    total=$(( user + nice + system + idle + iowait + irq + softirq + steal ))
+    idle_all=$(( idle + iowait ))
+    printf '%s %s' "$total" "$idle_all"
+}
+
 check_cpu() {
-    local cores load5 pct
-    cores=$(get_cores)
-    load5=$(awk '{print $2; exit}' /proc/loadavg 2>/dev/null)
-    if [ -z "$load5" ]; then
-        R_STATUS=FAIL; R_DETAIL="无法读取 /proc/loadavg"; return 1
+    local first second total1 idle1 total2 idle2 delta_total delta_idle pct
+    first=$(read_cpu_counters) || {
+        R_STATUS=FAIL; R_DETAIL="无法读取 /proc/stat CPU 计数"; return 1
+    }
+    sleep "$CPU_SAMPLE_SEC"
+    second=$(read_cpu_counters) || {
+        R_STATUS=FAIL; R_DETAIL="无法读取 /proc/stat CPU 计数"; return 1
+    }
+    set -- $first
+    total1=$1; idle1=$2
+    set -- $second
+    total2=$1; idle2=$2
+    delta_total=$(( total2 - total1 ))
+    delta_idle=$(( idle2 - idle1 ))
+    if [ "$delta_total" -le 0 ] || [ "$delta_idle" -lt 0 ]; then
+        R_STATUS=FAIL; R_DETAIL="/proc/stat CPU 采样差无效"; return 1
     fi
-    pct=$(awk -v l="$load5" -v c="$cores" 'BEGIN{printf "%.1f", l/c*100}')
-    R_DETAIL="load5=$load5 核数=$cores 折算=${pct}%（阈值 max_percent<=$CFG_CPU_MAX）"
+    pct=$(awk -v total="$delta_total" -v idle="$delta_idle" 'BEGIN{printf "%.1f", (total-idle)/total*100}')
+    R_DETAIL="cpu=${pct}%（阈值 max_percent<=$CFG_CPU_MAX，/proc/stat 采样${CPU_SAMPLE_SEC}s）"
     if num_le "$pct" "$CFG_CPU_MAX"; then return 0; fi
     R_STATUS=BUSY; return 1
 }
@@ -1011,12 +1041,163 @@ dry_run() {
 
 usage() {
     cat >&2 <<'EOF'
-用法: fnos-shutdown-executor.sh [--version|--dry-run|--verify]
+用法: fnos-shutdown-executor.sh [--version|--dry-run|--privileged-dry-run|--verify]
+      fnos-shutdown-executor.sh --install <数据目录>
+      fnos-shutdown-executor.sh --verify-installation
+      fnos-shutdown-executor.sh --uninstall
   （无参数）  主流程：root 由 cron 触发，持锁后按 config.json 窗口与检查项决定关机
   --version   输出 SCRIPT_VERSION 并退出（零副作用，任意用户）
   --dry-run   逐项打印十五项检查结果与实测值（不取锁、不写文件、绝不关机）
+  --privileged-dry-run  从 root 所有的固定配置读取数据目录后执行 dry-run（仅供精确 sudoers 规则）
   --verify    执行无副作用检查并立即写入部署心跳（绝不关机）
+  --install <数据目录>  安装执行器、cron、数据目录锚点和受限 sudoers 规则（仅 root）
+  --verify-installation 验证完整部署和受限提权入口并写入部署心跳（仅 root）
+  --uninstall 移除执行器、cron、数据目录锚点和受限 sudoers 规则（仅 root）
 EOF
+}
+
+require_root() {
+    if [ "$(id -u)" != "0" ]; then
+        printf '%s 必须以 root 运行\n' "$1" >&2
+        return 1
+    fi
+}
+
+validate_install_data_dir() {
+    case "$1" in
+        /*) ;;
+        *) printf '数据目录必须是已存在的绝对目录\n' >&2; return 1 ;;
+    esac
+    if [ ! -d "$1" ]; then
+        printf '数据目录不存在：%s\n' "$1" >&2
+        return 1
+    fi
+    case "$1" in
+        *$'\n'*|*$'\r'*) printf '数据目录不能包含换行符\n' >&2; return 1 ;;
+    esac
+}
+
+register_deployment() {
+    DATA_DIR=$1
+    init_data_paths || return 1
+    mkdir -p "$EXEC_DIR" || return 1
+    chmod 755 "$EXEC_DIR" 2>/dev/null || true
+    local preserved
+    preserved=$(prev_action)
+    write_status "${preserved:-out_of_window}" false || return 1
+}
+
+install_executor() {
+    local data_dir=$1 tmp_dir ping_bin rc=0
+    require_root "--install" || return 1
+    validate_install_data_dir "$data_dir" || return 1
+    id "$APP_USER" >/dev/null 2>&1 || {
+        printf '应用用户不存在：%s\n' "$APP_USER" >&2
+        return 1
+    }
+    [ -x /usr/sbin/visudo ] || {
+        printf '缺少 /usr/sbin/visudo\n' >&2
+        return 1
+    }
+    ping_bin=$(command -v ping 2>/dev/null) || ping_bin=""
+    [ -n "$ping_bin" ] || {
+        printf '找不到系统 ping 命令\n' >&2
+        return 1
+    }
+    tmp_dir=$(mktemp -d) || return 1
+    printf '%s\n' "$data_dir" > "$tmp_dir/data-dir"
+    printf '%s\n' "$APP_USER ALL=(root) NOPASSWD: $INSTALLED_EXECUTOR --privileged-dry-run" > "$tmp_dir/sudoers"
+    printf '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %q\n' "$data_dir" "$INSTALLED_EXECUTOR" > "$tmp_dir/cron"
+
+    if ! /usr/sbin/visudo -cf "$tmp_dir/sudoers"; then
+        printf 'sudoers 规则校验失败，未安装\n' >&2; rc=1
+    elif ! install -m 700 -o root -g root "$0" "$INSTALLED_EXECUTOR"; then
+        printf '安装执行器失败\n' >&2; rc=1
+    elif ! install -m 600 -o root -g root "$tmp_dir/data-dir" "$PRIVILEGED_DATA_DIR_FILE"; then
+        printf '安装数据目录锚点失败\n' >&2; rc=1
+    elif ! install -m 440 -o root -g root "$tmp_dir/sudoers" "$SUDOERS_FILE"; then
+        printf '安装 sudoers 规则失败\n' >&2; rc=1
+    elif ! install -m 644 -o root -g root "$tmp_dir/cron" "$CRON_FILE"; then
+        printf '安装 cron 规则失败\n' >&2; rc=1
+    elif ! setcap cap_net_raw+ep "$ping_bin"; then
+        printf '设置 ping capability 失败\n' >&2; rc=1
+    elif ! sudo -u "$APP_USER" "$ping_bin" -c 1 -W 1 127.0.0.1 >/dev/null; then
+        printf '应用用户 ping 验证失败\n' >&2; rc=1
+    elif ! sudo -u "$APP_USER" sudo -n "$INSTALLED_EXECUTOR" --privileged-dry-run >/dev/null; then
+        printf '应用用户受限 dry-run 验证失败\n' >&2; rc=1
+    elif ! register_deployment "$data_dir"; then
+        printf '写入部署心跳失败\n' >&2; rc=1
+    fi
+
+    rm -f "$tmp_dir/data-dir" "$tmp_dir/sudoers" "$tmp_dir/cron"
+    rmdir "$tmp_dir" 2>/dev/null || true
+    [ "$rc" -eq 0 ] || return "$rc"
+    printf '安装并验证成功（SCRIPT_VERSION=%s，DATA_DIR=%s）\n' "$SCRIPT_VERSION" "$data_dir"
+}
+
+verify_installation() {
+    local meta data_dir ping_bin expected_rule expected_cron
+    require_root "--verify-installation" || return 1
+    meta=$(stat -c '%u:%g:%a' "$INSTALLED_EXECUTOR" 2>/dev/null) || meta=""
+    [ "$meta" = "0:0:700" ] || {
+        printf '%s 必须为 root:root 700\n' "$INSTALLED_EXECUTOR" >&2; return 1;
+    }
+    meta=$(stat -c '%u:%g:%a' "$PRIVILEGED_DATA_DIR_FILE" 2>/dev/null) || meta=""
+    [ "$meta" = "0:0:600" ] || {
+        printf '%s 必须为 root:root 600\n' "$PRIVILEGED_DATA_DIR_FILE" >&2; return 1;
+    }
+    data_dir=""
+    IFS= read -r data_dir < "$PRIVILEGED_DATA_DIR_FILE" || [ -n "$data_dir" ]
+    validate_install_data_dir "$data_dir" || return 1
+    expected_rule="$APP_USER ALL=(root) NOPASSWD: $INSTALLED_EXECUTOR --privileged-dry-run"
+    meta=$(stat -c '%u:%g:%a' "$SUDOERS_FILE" 2>/dev/null) || meta=""
+    [ "$meta" = "0:0:440" ] || {
+        printf '%s 必须为 root:root 440\n' "$SUDOERS_FILE" >&2; return 1;
+    }
+    [ "$(cat "$SUDOERS_FILE" 2>/dev/null)" = "$expected_rule" ] || {
+        printf 'sudoers 规则内容不匹配\n' >&2; return 1;
+    }
+    /usr/sbin/visudo -cf "$SUDOERS_FILE" >/dev/null || return 1
+    meta=$(stat -c '%u:%g:%a' "$CRON_FILE" 2>/dev/null) || meta=""
+    [ "$meta" = "0:0:644" ] || {
+        printf '%s 必须为 root:root 644\n' "$CRON_FILE" >&2; return 1;
+    }
+    printf -v expected_cron '*/10 * * * * root FNOS_SHUTDOWN_DATA_DIR=%q %q' "$data_dir" "$INSTALLED_EXECUTOR"
+    [ "$(cat "$CRON_FILE" 2>/dev/null)" = "$expected_cron" ] || {
+        printf 'cron 规则内容不匹配\n' >&2; return 1;
+    }
+    ping_bin=$(command -v ping 2>/dev/null) || ping_bin=""
+    [ -n "$ping_bin" ] || { printf '找不到系统 ping 命令\n' >&2; return 1; }
+    sudo -u "$APP_USER" "$ping_bin" -c 1 -W 1 127.0.0.1 >/dev/null || return 1
+    sudo -u "$APP_USER" sudo -n "$INSTALLED_EXECUTOR" --privileged-dry-run || return 1
+    register_deployment "$data_dir" || return 1
+    printf '部署验证通过（SCRIPT_VERSION=%s，DATA_DIR=%s）\n' "$SCRIPT_VERSION" "$data_dir"
+}
+
+uninstall_executor() {
+    require_root "--uninstall" || return 1
+    rm -f "$CRON_FILE" "$PRIVILEGED_DATA_DIR_FILE" "$SUDOERS_FILE" "$INSTALLED_EXECUTOR"
+    printf '执行器、cron、数据目录锚点和受限 sudoers 规则已移除；ping capability 保留\n'
+}
+
+privileged_dry_run() {
+    local meta
+    if [ "$(id -u)" != "0" ]; then
+        printf '%s 必须以 root 运行\n' "--privileged-dry-run" >&2
+        exit 1
+    fi
+    if [ ! -f "$PRIVILEGED_DATA_DIR_FILE" ]; then
+        printf '缺少 %s；请在应用部署页重新执行一键部署命令\n' "$PRIVILEGED_DATA_DIR_FILE" >&2
+        exit 1
+    fi
+    meta=$(stat -c '%u:%g:%a' "$PRIVILEGED_DATA_DIR_FILE" 2>/dev/null) || meta=""
+    if [ "$meta" != "0:0:600" ]; then
+        printf '%s 必须为 root:root 600\n' "$PRIVILEGED_DATA_DIR_FILE" >&2
+        exit 1
+    fi
+    DATA_DIR=""
+    IFS= read -r DATA_DIR < "$PRIVILEGED_DATA_DIR_FILE" || [ -n "$DATA_DIR" ]
+    dry_run
 }
 
 # ---------- §3.6 签名自更新 ----------
@@ -1179,22 +1360,33 @@ main() {
 # 命令行（§4.1）
 # ================================================================
 
-if [ $# -gt 1 ]; then
-    usage
-    exit 3
-fi
-
 case "${1:-}" in
     "")
+        [ "$#" -eq 0 ] || { usage; exit 3; }
         main ;;
     --version)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
         # 零副作用：不取锁、不读写任何文件、不检查系统
         printf '%s\n' "$SCRIPT_VERSION"
         exit 0 ;;
     --dry-run)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
         dry_run ;;
+    --privileged-dry-run)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
+        privileged_dry_run ;;
     --verify)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
         verify ;;
+    --install)
+        [ "$#" -eq 2 ] || { usage; exit 3; }
+        install_executor "$2" ;;
+    --verify-installation)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
+        verify_installation ;;
+    --uninstall)
+        [ "$#" -eq 1 ] || { usage; exit 3; }
+        uninstall_executor ;;
     *)
         usage
         exit 3 ;;
