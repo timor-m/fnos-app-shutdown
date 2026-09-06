@@ -227,7 +227,7 @@ mark {
 .back-top {
   position: fixed;
   right: 22px;
-  bottom: 22px;
+  bottom: 44px;
   z-index: 60;
   display: inline-flex;
   align-items: center;
