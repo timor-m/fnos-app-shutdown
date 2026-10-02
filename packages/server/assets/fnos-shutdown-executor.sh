@@ -1,7 +1,7 @@
 #!/bin/bash
 # fnos-shutdown-executor.sh — fnOS「智能关机」root 执行器
 #
-# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.12
+# 实现依据：fnos-app-shutdown 执行器 ↔ 应用 协作契约 v0.13
 #   §3.0–§3.4 文件接口 / §4.1–§4.6 行为规约 / §6 错误处理矩阵
 #
 # 测试钩子（未列入契约，仅供本机开发联调；默认值与契约 §3.0 一致）：
@@ -15,7 +15,7 @@
 
 set -u
 
-SCRIPT_VERSION="1.0.6"
+SCRIPT_VERSION="1.0.7"
 
 DATA_DIR="${FNOS_SHUTDOWN_DATA_DIR:-}"
 EXEC_DIR=""
@@ -69,7 +69,7 @@ DEF_DL_EN=false;   DEF_DL_PORTS=""; DEF_DL_MAXCONN=0
 DEF_VM_EN=false
 DEF_PROC_EN=false; DEF_PROC_NAMES=""
 DEF_SCRUB_EN=false
-DEF_HOST_EN=false; DEF_HOSTS=""
+DEF_HOST_EN=false; DEF_HOSTS=""; DEF_HOST_ROUTE_OFFLINE=false
 DEF_CAL_EN=false;  DEF_CAL_WEEKDAYS=""; DEF_CAL_DATES=""
 
 NET_SAMPLE_SEC=1   # network 检查两次采样间隔（秒）
@@ -313,6 +313,7 @@ read_config() {
     CFG_PROC_EN=$DEF_PROC_EN;         CFG_PROC_NAMES=$DEF_PROC_NAMES
     CFG_SCRUB_EN=$DEF_SCRUB_EN
     CFG_HOST_EN=$DEF_HOST_EN;         CFG_HOSTS=$DEF_HOSTS
+    CFG_HOST_ROUTE_OFFLINE=$DEF_HOST_ROUTE_OFFLINE
     CFG_CAL_EN=$DEF_CAL_EN;           CFG_CAL_WEEKDAYS=$DEF_CAL_WEEKDAYS
     CFG_CAL_DATES=$DEF_CAL_DATES
     CONFIG_FALLBACK=false
@@ -465,6 +466,7 @@ read_config() {
         if [ -n "$sec" ]; then
             CFG_HOST_EN=$(fld_bool "$sec" enabled "$CFG_HOST_EN")
             CFG_HOSTS=$(fld_strlist "$sec" hosts "$CFG_HOSTS" '[a-zA-Z0-9.-]{1,64}')
+            CFG_HOST_ROUTE_OFFLINE=$(fld_bool "$sec" route_unreachable_as_offline "$CFG_HOST_ROUTE_OFFLINE")
         else log_warn "checks.host_online 结构非法，该项使用默认配置"; fi
     fi
     if has_key "$checks" calendar_rules; then
@@ -916,7 +918,7 @@ check_disk_scrub() {
 }
 
 check_host_online() {
-    local h up="" rc err
+    local h up="" route_down="" rc err
     if [ -z "$CFG_HOSTS" ]; then
         R_DETAIL="hosts 为空数组，无待检主机，视为通过"
         return 0
@@ -926,13 +928,20 @@ check_host_online() {
     fi
     for h in $CFG_HOSTS; do
         # stderr 收入变量（首行写入 R_DETAIL），否则 rc>=2 时无法分辨权限/路由/解析失败
-        err=$(ping -c 1 -W 1 "$h" 2>&1 >/dev/null)
+        err=$(LC_ALL=C ping -c 1 -W 1 "$h" 2>&1 >/dev/null)
         rc=$?
         err=$(printf '%s\n' "$err" | head -n 1)
         case $rc in
             0) up="$up $h" ;;
             1) : ;;   # 不可达
             *) # rc>=2：执行错误（非不可达），测量失败 fail-safe（防误判全部离线而误关机）
+               # 仅用户显式启用后，明确的路由错误可视为离线；DNS/权限等错误仍失败。
+               if [ "$CFG_HOST_ROUTE_OFFLINE" = true ]; then
+                   case "$err" in
+                       *"Network is unreachable"*|*"No route to host"*)
+                           route_down="$route_down $h"; continue ;;
+                   esac
+               fi
                # cron 主流程以 root 运行，自带 CAP_NET_RAW，与 setcap 无关；
                # 只有应用用户身份的 dry-run 才可能缺权限
                if [ "$(id -u)" = "0" ]; then
@@ -943,6 +952,7 @@ check_host_online() {
     done
     if [ -z "$up" ]; then
         R_DETAIL="hosts 全部不可达（$CFG_HOSTS，ping -c 1 -W 1）"
+        [ -z "$route_down" ] || R_DETAIL="$R_DETAIL；路由不可达视为离线:${route_down}"
         return 0
     fi
     R_DETAIL="在线主机:${up}（需全部不可达）"

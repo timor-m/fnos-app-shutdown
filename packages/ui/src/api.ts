@@ -115,7 +115,7 @@ export interface ShutdownConfig {
     vm_running: { enabled: boolean };
     process_running: { enabled: boolean; names: string[] };
     disk_scrub: { enabled: boolean };
-    host_online: { enabled: boolean; hosts: string[] };
+    host_online: { enabled: boolean; hosts: string[]; route_unreachable_as_offline: boolean };
     calendar_rules: { enabled: boolean; skip_weekdays: number[]; skip_dates: string[] };
   };
 }

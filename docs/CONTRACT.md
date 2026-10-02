@@ -1,6 +1,8 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.12 · 2026-09-04（CPU 改用 `/proc/stat` 采样；§9 增加严格限定的 root dry-run sudo 白名单）
+> 版本：v0.13 · 2026-10-02（`host_online` 可选地将明确的路由不可达视为离线）
+>
+> 历史：v0.12 · 2026-09-04（CPU 改用 `/proc/stat` 采样；§9 增加严格限定的 root dry-run sudo 白名单）
 >
 > 历史：v0.11 · 2026-08-24（§9 部署时直接为系统 `ping` 设置 `CAP_NET_RAW`，修复低权限检测 rc=2）
 >
@@ -101,7 +103,7 @@
     "vm_running":      { "enabled": false },
     "process_running": { "enabled": false, "names": [] },
     "disk_scrub":      { "enabled": false },
-    "host_online":     { "enabled": false, "hosts": [] },
+    "host_online":     { "enabled": false, "hosts": [], "route_unreachable_as_offline": false },
     "calendar_rules":  { "enabled": false, "skip_weekdays": [], "skip_dates": [] }
   }
 }
@@ -143,6 +145,7 @@
 | process_running | names | string[] | 每项仅含 `[a-zA-Z0-9_.+-]`，≤64 字符，可空数组 | [] |
 | disk_scrub | （无参数） | — | — | — |
 | host_online | hosts | string[] | 每项为 IPv4 或主机名，仅含 `[a-zA-Z0-9.-]`，≤64 字符，可空数组 | [] |
+| host_online | route_unreachable_as_offline | bool | true/false；仅将 `ping` 明确报告的 `Network is unreachable` / `No route to host` 视为该主机离线，其他执行错误仍不通过 | false |
 | calendar_rules | skip_weekdays | int[] | 每项 0–6（0=周日，`date +%w` 语义），可空数组 | [] |
 | calendar_rules | skip_dates | string[] | 每项 `MM-DD`（合法月日），可空数组 | [] |
 
@@ -324,7 +327,7 @@ write_status(max_rounds_reached); exit 0
 | vm_running | `virsh list --state-running` 运行中 VM 计数 | = 0 |
 | process_running | `pgrep` 逐一精确匹配 names（进程名，非 -f 全文） | 全部无匹配 |
 | disk_scrub | `/proc/mdstat` 无 resync/recovery/reshape/check 进行中；且每个 btrfs 挂载点 `btrfs scrub status` 无 scrub 运行中（ioctl 读内核态，不唤醒机械盘） | 同时满足 |
-| host_online | 使用系统 `ping -c 1 -W 1`；部署命令预先为其设置 `CAP_NET_RAW` | 全部不可达 |
+| host_online | 使用系统 `ping -c 1 -W 1`；部署命令预先为其设置 `CAP_NET_RAW`。退出码 1 表示主机不可达；退出码 ≥2 时仅在 `route_unreachable_as_offline=true` 且诊断明确为 `Network is unreachable` / `No route to host` 时视为离线。DNS、权限和其他执行错误均为测量失败 | 全部不可达或按选项判定为路由不可达 |
 | calendar_rules | 当天 `date +%w` ∉ skip_weekdays 且当天 `date +%m-%d` ∉ skip_dates | 不在任何跳过列表 |
 
 - `enabled=false` 的检查项直接视为通过，不执行任何采样

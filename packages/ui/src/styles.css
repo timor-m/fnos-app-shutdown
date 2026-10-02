@@ -226,8 +226,8 @@ mark {
 
 .back-top {
   position: fixed;
-  right: 22px;
-  bottom: 44px;
+  bottom: 80px;
+  right: 10px;
   z-index: 60;
   display: inline-flex;
   align-items: center;
@@ -1067,6 +1067,7 @@ select.input {
 }
 
 .check-card {
+  min-width: 0;
   padding: 12px 14px;
   border-radius: var(--r-md);
   background: var(--bg-inset);
@@ -1121,12 +1122,23 @@ select.input {
   opacity: 0.55;
 }
 
+.check-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--text-2);
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
 .param-label {
   display: block;
   color: var(--text-3);
   font-size: 0.82rem;
   margin: 8px 0 4px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .check-params .input {
@@ -1179,7 +1191,7 @@ select.input {
   position: fixed;
   left: 50%;
   bottom: max(12px, env(safe-area-inset-bottom));
-  z-index: 45;
+  z-index: 65;
   display: flex;
   align-items: center;
   justify-content: flex-end;
@@ -1198,7 +1210,7 @@ select.input {
   position: fixed;
   left: 50%;
   bottom: max(18px, env(safe-area-inset-bottom));
-  z-index: 46;
+  z-index: 66;
   padding: 10px 16px;
   transform: translateX(-50%);
   border: 1px solid color-mix(in srgb, var(--success) 45%, var(--border));
@@ -1727,7 +1739,7 @@ select.input {
 
   .status-grid,
   .check-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .field-row {

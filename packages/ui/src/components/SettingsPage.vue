@@ -37,7 +37,7 @@ function defaultForm() {
     vmRunning: { enabled: false },
     processRunning: { enabled: false, names: "" },
     diskScrub: { enabled: false },
-    hostOnline: { enabled: false, hosts: "" },
+    hostOnline: { enabled: false, hosts: "", routeUnreachableAsOffline: false },
     calendarRules: { enabled: false, skipWeekdays: [] as number[], skipDates: "" }
   };
 }
@@ -137,7 +137,8 @@ function fillFromConfig(config: ShutdownConfig) {
   form.diskScrub = { enabled: config.checks.disk_scrub.enabled };
   form.hostOnline = {
     enabled: config.checks.host_online.enabled,
-    hosts: config.checks.host_online.hosts.join(", ")
+    hosts: config.checks.host_online.hosts.join(", "),
+    routeUnreachableAsOffline: config.checks.host_online.route_unreachable_as_offline ?? false
   };
   form.calendarRules = {
     enabled: config.checks.calendar_rules.enabled,
@@ -357,7 +358,11 @@ function buildConfig(
       vm_running: { enabled: s.vmRunning.enabled },
       process_running: { enabled: s.processRunning.enabled, names: processNames! },
       disk_scrub: { enabled: s.diskScrub.enabled },
-      host_online: { enabled: s.hostOnline.enabled, hosts: hosts! },
+      host_online: {
+        enabled: s.hostOnline.enabled,
+        hosts: hosts!,
+        route_unreachable_as_offline: s.hostOnline.routeUnreachableAsOffline
+      },
       calendar_rules: {
         enabled: s.calendarRules.enabled,
         skip_weekdays: [...skipWeekdays].sort((a, b) => a - b),
@@ -806,6 +811,14 @@ onMounted(() => {
             <label class="param-label">IP / 主机名（逗号分隔；留空 = 直接通过）</label>
             <input v-model="form.hostOnline.hosts" class="input" type="text" placeholder="192.168.1.10, 192.168.1.20" :disabled="!form.hostOnline.enabled" />
             <p v-if="fieldErrors['hostOnline.hosts']" class="field-error">{{ fieldErrors["hostOnline.hosts"] }}</p>
+            <label class="check-option">
+              <span>路由不可达时视为离线</span>
+              <span class="switch">
+                <input v-model="form.hostOnline.routeUnreachableAsOffline" type="checkbox" :disabled="!form.hostOnline.enabled" />
+                <span class="slider"></span>
+              </span>
+            </label>
+            <p class="field-desc">适用于路由器断电后 NAS 报“网络不可达”或“无路由”的情况。DNS、权限等 ping 错误仍会阻止关机。</p>
           </div>
         </article>
 

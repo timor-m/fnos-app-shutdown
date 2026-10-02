@@ -28,7 +28,7 @@ export type ShutdownConfig = {
     vm_running: { enabled: boolean };
     process_running: { enabled: boolean; names: string[] };
     disk_scrub: { enabled: boolean };
-    host_online: { enabled: boolean; hosts: string[] };
+    host_online: { enabled: boolean; hosts: string[]; route_unreachable_as_offline: boolean };
     calendar_rules: { enabled: boolean; skip_weekdays: number[]; skip_dates: string[] };
   };
 };
@@ -58,7 +58,7 @@ export function defaultConfig(): ShutdownConfig {
       vm_running: { enabled: false },
       process_running: { enabled: false, names: [] },
       disk_scrub: { enabled: false },
-      host_online: { enabled: false, hosts: [] },
+      host_online: { enabled: false, hosts: [], route_unreachable_as_offline: false },
       calendar_rules: { enabled: false, skip_weekdays: [], skip_dates: [] }
     }
   };
@@ -445,6 +445,13 @@ function validateCheckItem(
           config.checks.host_online.hosts = value.hosts as string[];
         } else {
           onError("checks.host_online.hosts", problem);
+        }
+      }
+      if ("route_unreachable_as_offline" in value) {
+        if (typeof value.route_unreachable_as_offline === "boolean") {
+          config.checks.host_online.route_unreachable_as_offline = value.route_unreachable_as_offline;
+        } else {
+          onError("checks.host_online.route_unreachable_as_offline", "必须是布尔值");
         }
       }
       break;

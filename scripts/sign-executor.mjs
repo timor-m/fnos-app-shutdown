@@ -18,8 +18,8 @@ if (!existsSync(privateKeyFile)) {
   const fromEnv = process.env.EXECUTOR_SIGNING_KEY;
   if (!fromEnv) {
     console.error(`Missing signing key: ${privateKeyFile}（或环境变量 EXECUTOR_SIGNING_KEY）`);
-    console.error("生成：openssl genrsa -out keys/executor-private.pem 3072");
-    console.error("并把公钥（openssl rsa -pubout）嵌入脚本 SELF_UPDATE_PUBKEY 常量。");
+    console.error("升级现有设备必须使用与脚本内嵌公钥匹配的原私钥；新生成的密钥不能签署自动更新。");
+    console.error("若原私钥已丢失，需生成新密钥、替换 SELF_UPDATE_PUBKEY，并让设备重新手动部署。");
     process.exit(1);
   }
   privateKey = join(rootDir, ".fnos-build", ".executor-signing-key.tmp.pem");
