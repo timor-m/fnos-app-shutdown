@@ -106,9 +106,9 @@ onBeforeUnmount(() => {
       <div v-if="open" class="time-picker-layer" @mousedown.self="open = false" @touchstart.self.prevent="open = false">
         <div ref="panel" class="time-picker-panel" :style="panelStyle" role="dialog" aria-modal="true" :aria-label="label || '选择时间'">
           <header class="time-picker-header">
-            <button type="button" aria-label="取消" title="取消" @click="open = false"><X :size="18" /></button>
+            <button type="button" aria-label="取消" title="取消" @click="open = false"><X :size="16" /><span>取消</span></button>
             <strong>{{ label || "选择时间" }}</strong>
-            <button type="button" class="confirm" aria-label="确认" title="确认" @click="confirm"><Check :size="18" /></button>
+            <button type="button" class="confirm" aria-label="确认" title="确认" @click="confirm"><Check :size="16" /><span>确定</span></button>
           </header>
           <div class="time-picker-wheels">
             <div class="time-picker-wheel">
@@ -132,7 +132,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .time-picker { width: 100%; min-width: 0; }
-.time-picker-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-inset); color: var(--text-1); font: inherit; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; }
+.time-picker-trigger { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-inset); color: var(--text-1); font: inherit;
+  font-size: 13px;
+  line-height: 20px; font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; }
 .time-picker-trigger svg { flex: 0 0 auto; color: var(--text-3); }
 .time-picker-trigger:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
 .time-picker-layer { position: fixed; inset: 0; z-index: 140; background: rgba(0, 0, 0, .35); pointer-events: none; }
@@ -155,4 +157,14 @@ onBeforeUnmount(() => {
   .time-wheel-scroll { height: 202px; padding-block: 81px; scroll-padding-top: 81px; }
 }
 @media (prefers-reduced-motion: reduce) { .time-picker-panel { animation: none; } }
+
+@media (max-width: 760px), (pointer: coarse) {
+  .time-picker-header button { width: auto; min-width: 60px; height: 36px; padding: 0 8px; border-radius: 9px; gap: 5px; display: flex; align-items: center; justify-content: center; font-size: 14px; touch-action: manipulation; }
+  .time-picker-header .confirm { background: var(--brand-soft); font-weight: 600; }
+  .time-picker-header button:active { background: var(--bg-hover); }
+  .time-picker-header .confirm:active { background: var(--brand); color: white; }
+}
+@media (min-width: 761px) and (pointer: fine) {
+  .time-picker-header button span { display: none; }
+}
 </style>

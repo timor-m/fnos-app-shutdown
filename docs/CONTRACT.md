@@ -1,6 +1,8 @@
 # fnos-app-shutdown 执行器 ↔ 应用 协作契约（接口规范）
 
-> 版本：v0.13 · 2026-10-02（`host_online` 可选地将明确的路由不可达视为离线）
+> 版本：v0.14 · 2026-10-29（新增 §13 定时开机）
+>
+> 历史：v0.13 · 2026-10-02（`host_online` 可选地将明确的路由不可达视为离线）
 >
 > 历史：v0.12 · 2026-09-04（CPU 改用 `/proc/stat` 采样；§9 增加严格限定的 root dry-run sudo 白名单）
 >
@@ -213,6 +215,7 @@
 | `monitoring` | 进入监控循环（每轮刷新 last_trigger） |
 | `window_end` | 监控中离开窗口，正常结束 |
 | `max_rounds_reached` | 达到 max_checks 未关机 |
+| `wake_failed` | 开机计划准备失败，本次自动关机已停止（§13） |
 | `poweroff` | 条件满足，已发起关机（写完该状态后立即执行 poweroff） |
 
 **写入规则（executor）**：原子写；644 root:root；每次触发至少写一次。
@@ -495,3 +498,17 @@ sudo /usr/local/sbin/fnos-shutdown-executor.sh --uninstall
 
 **D2 · v2 检查项选型与 network 语义修订**（2026-08-12 定）
 结合目标机器实测（smbd 常驻、md127 RAID1、btrfs、qBittorrent/aria2/frpc 运行中、libvirtd 无 VM、upsd 未运行），从 §4.6 候选目录升格首批 v2 检查项：`smb_sessions`（家人拷贝文件场景）、`tcp_sessions`（ssh 泛化，覆盖媒体 8005/网关 5666 等）、`download_active`（ss 连接计数，刻意避开需凭证的 WebUI API）、`min_uptime`（防 WoL/定时唤醒后立即被关机的抖动场景，`/proc/uptime` 零成本）。同时修订两处 v1 遗留：`network` 速率单位明确为 **KiB/s**（字段名 max_*_kbps 语义，v1 实现已按此执行，契约原文未写明）；§4.3 伪代码 `write_status(triggered)` 的 `triggered` 非 last_action 枚举值，仅表"入口写"语义（v1 实现已按此执行）。`network.max_tx_kbps` 以「可选字段、默认 0=不启用」加入，旧 executor 忽略后行为不变，满足 §7。
+
+## 13. 定时开机（v0.14 · 2026-10-29）
+
+新增独立开机计划；不新增定时关机/重启，不改变智能关机检查项。总开关默认关闭。
+
+- 应用原子写 `data/wake.json`：`version:1`、`enabled:bool`、`device:"auto"|"rtcN"`、`alarm_policy:"preserve"|"replace"`（默认 preserve）、`plans:[{id,enabled,time:"HH:MM",weekdays:[0..6],note}]`，星期 0=周日，最多 64 条，备注最多 120 字。应用保存使用内容摘要 revision 拒绝覆盖其他窗口的新配置。重复启用计划在星期与时间重叠时拒绝保存。
+- 公用 Python 标准库实现负责双端校验、按 NAS 系统时区计算未来 7 天预览、设备只读检测与 root 写入。源文件 `scripts/wake-runtime.py` 在构建前嵌入现有签名 Bash 执行器；部署仍只分发一个签名文件，root 不导入应用可写目录的代码。新增运行依赖 `/usr/bin/python3`（Python 3.8+）。
+- `--wake-inspect`/`--wake-validate` 从 stdin 接收 JSON，无系统写入，任意用户可用；`--wake-tick`/`--wake-prepare`/`--wake-clear` 仅 root 调用、无额外参数，数据目录只从既有 root:root 600 锚点读取。新增能力仅为枚举 RTC、写 RTC 闹钟和自身状态，禁止接受路径/命令。
+- 状态写入 root 所有 `/var/lib/fnos-shutdown-wake/status.json`，应用只读。独占锁 `/run/fnos-shutdown-wake.lock` 将周期同步、关机前同步、清理串行化。状态记录当前归属设备、原始闹钟值、下次开机时间、错误、心跳与最多 30 条同步记录。只有当前值仍等于归属值时才清理旧闹钟；外部修改时默认停止接管并报告冲突，replace 为用户明确选择的覆盖策略。
+- root 周期同步每分钟一次，独立于原智能关机 cron。systemd oneshot + RemainAfterExit + ExecStop 在正常关机前同步，RequiresMountsFor 保持数据卷可读。智能关机发起 poweroff 前额外同步，启用计划但同步失败时不自动关机；正常手动关机的 systemd 钩子失败无法保证阻止关机。
+- 只自动选择唯一可用 RTC，多个候选要求手选；按 RTC 实测偏差校正，读取失败、偏差超 14 小时或偏离 15 分钟整数倍超过 120 秒时报错，不猜测 UTC。写入先清零，再写并读回校验；失败尝试恢复原闹钟。不能保证其他进程不在锁外修改硬件。
+- RTC 接口可用不等于支持关机唤醒；界面始终将接口检测、写入结果与实际唤醒验证区分。软件无法自动证明 BIOS/固件的 S5 唤醒能力，不自动关机测试。计划少于 120 秒即将触发时阻止本次自动关机，避免关机过程错过闹钟。
+- 禁用/删除全部计划时仅清理本应用仍持有的闹钟；数据目录或配置缺失时清理自己的闹钟。损坏配置不采用默认启用值，报告错误并清理自身闹钟。卸载先移除 wake cron、停止服务、清理拥有的闹钟，再删除执行器和锚点；清理失败保留执行器以供重试。
+- 新增 GET/PUT `/api/wake`；GET 只读检测和预览，PUT 验证后保存，约一分钟内由 root 应用。新版本首次使用需要重新部署以安装额外 cron/systemd；签名更新脚本本身不代表服务已安装。

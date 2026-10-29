@@ -44,22 +44,35 @@ export async function apiGetText(path: string): Promise<string> {
   return res.text();
 }
 
-/** 复制到剪贴板，非安全上下文（http）下回退 execCommand */
+/** 复制到剪贴板，HTTP 或 Clipboard API 被拒绝时尝试兼容方式。 */
 export async function copyToClipboard(text: string): Promise<void> {
   if (navigator.clipboard && window.isSecureContext) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Embedded pages may not have Clipboard API permission.
+    }
   }
+  const previousFocus = document.activeElement;
   const ta = document.createElement("textarea");
   ta.value = text;
+  ta.readOnly = true;
   ta.style.position = "fixed";
+  ta.style.top = "0";
+  ta.style.left = "0";
   ta.style.opacity = "0";
   document.body.appendChild(ta);
-  ta.select();
   try {
-    document.execCommand("copy");
+    ta.focus({ preventScroll: true });
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    if (!document.execCommand("copy")) {
+      throw new Error("复制失败，请手动选择文本复制");
+    }
   } finally {
     document.body.removeChild(ta);
+    if (previousFocus instanceof HTMLElement) previousFocus.focus({ preventScroll: true });
   }
 }
 
@@ -209,4 +222,42 @@ export interface DryRunData {
 
 export function fetchDryRun(): Promise<DryRunData> {
   return apiGet<DryRunData>("checks/dry-run");
+}
+
+export interface WakePlan {
+  id: string;
+  enabled: boolean;
+  time: string;
+  weekdays: number[];
+  note: string;
+}
+export interface WakeConfig {
+  version: number;
+  enabled: boolean;
+  device: string;
+  alarm_policy: "preserve" | "replace";
+  plans: WakePlan[];
+}
+export interface WakeEvent { id: string; note: string; timestamp: number; at: string }
+export interface WakeData {
+  config: WakeConfig;
+  revision: string;
+  config_error: string | null;
+  devices: { id: string; name: string; available: boolean; alarm: number | null; offset: number | null; error: string | null }[];
+  preview: WakeEvent[];
+  next_wake: WakeEvent | null;
+  state: {
+    version?: string;
+    checked_at?: string;
+    result?: "armed" | "disabled" | "error";
+    error?: string | null;
+    next_wake?: number | null;
+    owned?: { device: string; alarm: number };
+    applied_config?: WakeConfig;
+    history?: { at: string; message: string }[];
+  } | null;
+  installed: boolean;
+  status_error: string | null;
+  timezone: string;
+  server_time: string;
 }

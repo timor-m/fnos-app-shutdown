@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { Activity, Check, Copy, ListOrdered, RefreshCw, Trash2, Wrench } from "lucide-vue-next";
 import { apiGet, apiGetText, copyToClipboard, fetchAbout, type StatusData } from "../api";
 import DeployBadge from "./DeployBadge.vue";
@@ -53,12 +53,25 @@ const manualInstallCommand = computed(() => commandWithDataDir(MANUAL_INSTALL_CO
 const loading = ref(true);
 const error = ref("");
 const status = ref<StatusData | null>(null);
+const commandError = ref("");
+
+async function loadCommandConfig() {
+  commandError.value = "";
+  try {
+    const about = await fetchAbout();
+    servicePort.value = about.app.servicePort;
+    dataDir.value = about.app.storageDir || null;
+  } catch (err) {
+    commandError.value = err instanceof Error ? err.message : "部署命令参数读取失败";
+  }
+}
 
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    status.value = await apiGet<StatusData>("status");
+    const [result] = await Promise.all([apiGet<StatusData>("status"), loadCommandConfig()]);
+    status.value = result;
   } catch (err) {
     error.value = err instanceof Error ? err.message : "加载失败";
   } finally {
@@ -69,8 +82,20 @@ async function load() {
 // ---------- 复制 ----------
 const copiedKey = ref("");
 let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+const manualCopyText = ref("");
+const manualCopyInput = ref<HTMLTextAreaElement | null>(null);
 
 async function copy(key: string, text: string) {
+  copyError.value = "";
+  manualCopyText.value = "";
+  if ((key === "deploy" || key === "manual") && !dataDir.value) {
+    copyError.value = "尚未取得数据目录，请点击刷新重试后再复制部署命令。";
+    return;
+  }
+  if (key === "deploy" && servicePort.value === null) {
+    copyError.value = "尚未取得直连端口，请刷新重试；若未启用直连端口，请使用下方手动安装方式。";
+    return;
+  }
   try {
     await copyToClipboard(text);
     copiedKey.value = key;
@@ -80,7 +105,11 @@ async function copy(key: string, text: string) {
     }, 2000);
   } catch {
     copiedKey.value = "";
-    copyError.value = "复制失败，请手动选择文本复制";
+    copyError.value = "浏览器未允许自动复制，已选中下方文本，请按 Ctrl+C（Mac：⌘C），手机可长按复制。";
+    manualCopyText.value = text;
+    await nextTick();
+    manualCopyInput.value?.focus();
+    manualCopyInput.value?.select();
   }
 }
 
@@ -102,19 +131,15 @@ async function copyScript() {
   }
 }
 
-onMounted(() => {
-  void load();
-  // 直连端口用于生成一键命令；失败不影响主流程（命令保留占位符并提示）
-  fetchAbout()
-    .then((a) => {
-      servicePort.value = a.app.servicePort;
-      dataDir.value = a.app.storageDir || null;
-    })
-    .catch(() => {});
-});
+onMounted(() => { void load(); });
 </script>
 
 <template>
+  <div class="deploy-page">
+  <div v-if="copyError" class="feedback" role="alert">
+    <p>{{ copyError }}</p>
+    <textarea v-if="manualCopyText" ref="manualCopyInput" class="manual-copy-input" :value="manualCopyText" readonly rows="8" aria-label="手动复制命令或脚本" />
+  </div>
   <div v-if="loading" class="feedback">正在读取部署状态...</div>
   <div v-else-if="error" class="feedback error">
     {{ error }}
@@ -157,7 +182,7 @@ onMounted(() => {
           <ListOrdered :size="18" />
           部署步骤
         </h2>
-        <span>部署脚本仅首次需要手动执行</span>
+        <span>首次使用开机计划需重新部署</span>
       </header>
 
       <div class="steps">
@@ -166,7 +191,7 @@ onMounted(() => {
           <div class="step-body">
             <p class="step-title">复制部署命令</p>
             <p class="field-desc">
-              安装执行器，并配置 cron 和必要的 sudo 检测权限。
+              安装执行器、开机计划服务、cron 和必要的 sudo 检测权限。需要系统 Python 3.8+。
             </p>
             <p v-if="servicePort === null" class="badge-hint warn">
               未检测到服务端口，请先完成端口配置或使用下方手动安装方式。
@@ -174,6 +199,7 @@ onMounted(() => {
             <p v-if="dataDir === null" class="badge-hint warn">
               未检测到应用数据目录，请刷新后重试。
             </p>
+            <p v-if="commandError" class="badge-hint warn" role="alert">部署命令参数读取失败：{{ commandError }}</p>
             <div class="cmd-block">
               <div class="cmd-block-head">
                 <span class="cmd-title">一键部署 / 升级</span>
@@ -181,7 +207,6 @@ onMounted(() => {
                   class="copy-btn"
                   :class="{ copied: copiedKey === 'deploy' }"
                   type="button"
-                  :disabled="servicePort === null || dataDir === null"
                   @click="copy('deploy', deployCommand)"
                 >
                   <Check v-if="copiedKey === 'deploy'" :size="12" />
@@ -189,7 +214,7 @@ onMounted(() => {
                   {{ copiedKey === "deploy" ? "已复制" : "复制" }}
                 </button>
               </div>
-              <pre class="cmd-view">{{ deployCommand }}</pre>
+              <pre class="cmd-view" tabindex="0" aria-label="可横向滚动的命令">{{ deployCommand }}</pre>
             </div>
           </div>
         </div>
@@ -218,7 +243,6 @@ onMounted(() => {
                   class="copy-btn"
                   :class="{ copied: copiedKey === 'verify' }"
                   type="button"
-                  :disabled="dataDir === null"
                   @click="copy('verify', verifyCommand)"
                 >
                   <Check v-if="copiedKey === 'verify'" :size="12" />
@@ -226,7 +250,7 @@ onMounted(() => {
                   {{ copiedKey === "verify" ? "已复制" : "复制" }}
                 </button>
               </div>
-              <pre class="cmd-view">{{ verifyCommand }}</pre>
+              <pre class="cmd-view" tabindex="0" aria-label="可横向滚动的命令">{{ verifyCommand }}</pre>
             </div>
           </div>
         </div>
@@ -234,14 +258,14 @@ onMounted(() => {
     </section>
 
     <!-- 备选方案 -->
-    <section class="panel">
-      <header class="panel-header">
-        <h2 class="panel-title">
+    <details class="panel deploy-extra">
+      <summary class="panel-header">
+        <span class="panel-title">
           <Wrench :size="18" />
           备选方案：手动安装脚本
-        </h2>
+        </span>
         <span>一键命令不可用时使用</span>
-      </header>
+      </summary>
       <p class="field-desc block-desc">
         将脚本保存为 <code>/tmp/fnos-shutdown-executor.sh</code>，再执行安装命令。
       </p>
@@ -259,7 +283,6 @@ onMounted(() => {
             class="copy-btn"
             :class="{ copied: copiedKey === 'manual' }"
             type="button"
-            :disabled="dataDir === null"
             @click="copy('manual', manualInstallCommand)"
           >
             <Check v-if="copiedKey === 'manual'" :size="12" />
@@ -267,20 +290,20 @@ onMounted(() => {
             {{ copiedKey === "manual" ? "已复制" : "复制" }}
           </button>
         </div>
-        <pre class="cmd-view">{{ manualInstallCommand }}</pre>
+        <pre class="cmd-view" tabindex="0" aria-label="可横向滚动的命令">{{ manualInstallCommand }}</pre>
       </div>
-      <p v-if="copyError" class="badge-hint warn">{{ copyError }}</p>
-    </section>
+
+    </details>
 
     <!-- 卸载执行器 -->
-    <section class="panel">
-      <header class="panel-header">
-        <h2 class="panel-title">
+    <details class="panel deploy-extra">
+      <summary class="panel-header">
+        <span class="panel-title">
           <Trash2 :size="18" />
           卸载执行器
-        </h2>
+        </span>
         <span>手动操作</span>
-      </header>
+      </summary>
       <p class="field-desc block-desc">
         应用卸载后，如需清理执行器和相关授权，请手动执行：
       </p>
@@ -298,8 +321,49 @@ onMounted(() => {
             {{ copiedKey === "uninstall" ? "已复制" : "复制" }}
           </button>
         </div>
-        <pre class="cmd-view">{{ UNINSTALL_COMMAND }}</pre>
+        <pre class="cmd-view" tabindex="0" aria-label="可横向滚动的命令">{{ UNINSTALL_COMMAND }}</pre>
       </div>
-    </section>
+    </details>
   </template>
+  </div>
 </template>
+
+<style scoped>
+.deploy-page { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 10px; font-size: 12px; }
+.manual-copy-input { box-sizing: border-box; width: 100%; font-family: monospace; resize: vertical; }
+.deploy-page > .panel { min-width: 0; margin: 0; padding: 12px; }
+.panel-header { gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+.panel-title { font-size: 14px; gap: 6px; }
+.panel-title svg { width: 16px; height: 16px; }
+.panel-header > span:not(.panel-title) { font-size: 12px; }
+.deploy-page .btn { box-sizing: border-box; min-height: 0; height: 30px; padding: 0 9px; border-radius: 6px; font-size: 12px; gap: 5px; box-shadow: none; }
+.field-desc, .badge-hint, :deep(.badge-hint) { font-size: 12px; line-height: 1.6; margin: 6px 0 0; overflow-wrap: anywhere; }
+:deep(.deploy-badge-wrap) { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+:deep(.deploy-badge) { padding: 3px 8px; font-size: 12px; gap: 5px; border-radius: 6px; }
+:deep(.deploy-badge-wrap .badge-hint) { margin: 0; }
+.step { gap: 8px; padding: 4px 0 12px; }
+.step:last-child { padding-bottom: 0; }
+.step-num { width: 22px; height: 22px; font-size: 12px; }
+.step:not(:last-child)::before { left: 10px; top: 29px; width: 1px; }
+.step-title { font-size: 13px; line-height: 22px; margin: 0; }
+.step-body .field-desc { margin: 3px 0 6px; }
+.cmd-block { min-width: 0; max-width: 100%; margin: 6px 0 0; border-radius: 6px; }
+.cmd-block-head { padding: 4px 8px; gap: 8px; }
+.cmd-block-head .cmd-title { font-size: 11px; letter-spacing: 0; }
+.copy-btn { box-sizing: border-box; height: 26px; padding: 0 7px; border-radius: 5px; font-size: 12px; }
+.cmd-view { max-width: 100%; box-sizing: border-box; overflow: auto; padding: 8px; font-size: 12px; line-height: 1.5; white-space: pre; word-break: normal; tab-size: 2; }
+.actions-row { margin: 8px 0; gap: 6px; }
+.block-desc { margin: 6px 0; }
+.deploy-extra > summary { cursor: pointer; margin: 0; list-style: none; }
+.deploy-extra > summary::-webkit-details-marker { display: none; }
+.deploy-extra > summary::after { content: '+'; margin-left: auto; color: var(--text-2); font-size: 16px; }
+.deploy-extra[open] > summary::after { content: '−'; }
+.deploy-extra[open] > summary { margin-bottom: 8px; }
+.deploy-page button, .deploy-extra > summary { touch-action: manipulation; }
+.deploy-page button:focus-visible, .deploy-extra > summary:focus-visible, .cmd-view:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+@media (max-width: 760px) {
+  .deploy-page > .panel { padding: 10px; }
+  .deploy-extra > summary > span:not(.panel-title) { display: none; }
+  .cmd-view { max-height: 180px; }
+}
+</style>

@@ -11,6 +11,7 @@ import {
   writeFileSync
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { verify } from "node:crypto";
 
 const rootDir = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const packageDir = join(rootDir, ".fnos-build", "package");
@@ -87,6 +88,10 @@ chmodSync(join(appServerAssets, "fnos-shutdown-executor.sh"), 0o644);
 const executorSigSrc = `${executorScriptSrc}.sig`;
 if (!existsSync(executorSigSrc)) {
   throw new Error("Missing fnos-shutdown-executor.sh.sig. Run `npm run sign:executor` first.");
+}
+const executorPublicKey = executorScriptBody.match(/SELF_UPDATE_PUBKEY='([\s\S]*?)'/)?.[1];
+if (!executorPublicKey || !verify("sha256", Buffer.from(executorScriptBody), executorPublicKey, readFileSync(executorSigSrc))) {
+  throw new Error("Executor signature is stale or invalid. Sign with the original executor key before packaging.");
 }
 copyFileSync(executorSigSrc, join(appServerAssets, "fnos-shutdown-executor.sh.sig"));
 chmodSync(join(appServerAssets, "fnos-shutdown-executor.sh.sig"), 0o644);

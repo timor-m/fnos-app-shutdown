@@ -1,6 +1,6 @@
 {
   "name": "fnos-app-shutdown",
-  "version": "1.0.7",
+  "version": "1.1.0",
   "description": "fnOS smart shutdown app: idle checks inside a nightly window trigger poweroff",
   "type": "module",
   "workspaces": [
@@ -13,14 +13,16 @@
     "dev:web": "vite --config packages/ui/vite.config.ts",
     "dev:server": "node scripts/dev.mjs",
     "build:web": "vite build --config packages/ui/vite.config.ts",
-    "build": "npm run build:web && nitro build",
+    "build": "node scripts/embed-wake.mjs && npm run build:web && nitro build",
     "start": "node scripts/start.mjs",
     "download:fnpack": "node scripts/download-fnpack.mjs",
     "prepare:package": "node scripts/prepare-package.mjs",
     "validate:package": "node scripts/validate-package.mjs",
     "sign:executor": "node scripts/sign-executor.mjs",
     "pack:app": "npm run build && npm run sign:executor && npm run prepare:package && bash scripts/pack-app.sh && npm run validate:package",
-    "pack:fpk": "npm run pack:app && bash scripts/pack-fpk.sh"
+    "pack:fpk": "npm run pack:app && bash scripts/pack-fpk.sh",
+    "test:wake": "python3 -m unittest discover -s tests -p \"test_wake*.py\" -v && node scripts/embed-wake.mjs --check",
+    "test:wake:api": "node tests/wake-api.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^6.0.7",

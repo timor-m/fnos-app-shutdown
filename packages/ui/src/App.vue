@@ -1,24 +1,27 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, type Component } from "vue";
-import { Gauge, Info, Moon, Package, Rocket, ScrollText, Settings, Sun } from "lucide-vue-next";
+import { AlarmClock, Gauge, Info, Moon, Package, Rocket, ScrollText, Settings, Sun } from "lucide-vue-next";
 import appIcon from "./assets/app-icon.png";
 import StatusPage from "./components/StatusPage.vue";
 import SettingsPage from "./components/SettingsPage.vue";
 import LogsPage from "./components/LogsPage.vue";
 import DeployPage from "./components/DeployPage.vue";
+import WakePage from "./components/WakePage.vue";
 import AboutPage from "./components/AboutPage.vue";
 
-type TabKey = "status" | "settings" | "logs" | "deploy" | "about";
+type TabKey = "wake" | "status" | "settings" | "logs" | "deploy" | "about";
 
 const tabs: { key: TabKey; label: string; icon: Component }[] = [
   { key: "status", label: "状态", icon: Gauge },
-  { key: "settings", label: "设置", icon: Settings },
+  { key: "settings", label: "关机", icon: Settings },
+  { key: "wake", label: "开机", icon: AlarmClock },
   { key: "logs", label: "日志", icon: ScrollText },
   { key: "deploy", label: "部署", icon: Package },
   { key: "about", label: "关于", icon: Info }
 ];
 
 const activeTab = ref<TabKey>("status");
+const wakeVisited = ref(false);
 
 // ---------- 主题：明亮 / 暗黑，默认跟随系统，选择持久化 ----------
 type Theme = "light" | "dark";
@@ -101,7 +104,7 @@ onBeforeUnmount(() => {
           type="button"
           :title="tab.label"
           :aria-label="tab.label"
-          @click="activeTab = tab.key"
+          @click="activeTab = tab.key; if (tab.key === 'wake') wakeVisited = true"
         >
           <component :is="tab.icon" :size="16" />
           <span class="tab-label">{{ tab.label }}</span>
@@ -121,11 +124,12 @@ onBeforeUnmount(() => {
   </header>
 
   <main class="shell">
-    <StatusPage v-if="activeTab === 'status'" @open-deploy="activeTab = 'deploy'" />
+    <WakePage v-if="wakeVisited" v-show="activeTab === 'wake'" :active="activeTab === 'wake'" @open-deploy="activeTab = 'deploy'" />
+    <StatusPage v-if="activeTab === 'status'" @open-deploy="activeTab = 'deploy'" @open-wake="wakeVisited = true; activeTab = 'wake'" />
     <SettingsPage v-else-if="activeTab === 'settings'" />
     <LogsPage v-else-if="activeTab === 'logs'" />
     <DeployPage v-else-if="activeTab === 'deploy'" />
-    <AboutPage v-else />
+    <AboutPage v-else-if="activeTab === 'about'" />
   </main>
 
   <!-- 右下角：回顶小火箭 -->

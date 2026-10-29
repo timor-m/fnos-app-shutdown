@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from "vue";
 import {
   Activity,
+  AlarmClock,
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -23,11 +24,12 @@ import {
   type DryRunCheckResult,
   type DryRunData,
   type ExecutorState,
+  type WakeData,
   type StatusData
 } from "../api";
 import { formatClock, formatCountdown, formatRelative } from "../utils";
 
-const emit = defineEmits<{ (e: "open-deploy"): void }>();
+const emit = defineEmits<{ (e: "open-deploy"): void; (e: "open-wake"): void }>();
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -51,6 +53,29 @@ async function loadStatus(silent = false) {
   } finally {
     loading.value = false;
   }
+}
+
+// Wake information loads independently so a missing RTC runtime cannot hide shutdown status.
+const wake = ref<WakeData | null>(null);
+const wakeError = ref("");
+const wakeLoading = ref(false);
+async function loadWake() {
+  if (wakeLoading.value) return;
+  wakeLoading.value = true;
+  try {
+    wake.value = await apiGet<WakeData>("wake");
+    wakeError.value = "";
+  } catch (err) {
+    wake.value = null;
+    wakeError.value = err instanceof Error ? err.message : "读取开机信息失败";
+  } finally { wakeLoading.value = false; }
+}
+function wakeDays(days: number[]) {
+  const has = (values: number[]) => days.length === values.length && values.every(day => days.includes(day));
+  if (has([0, 1, 2, 3, 4, 5, 6])) return "每天";
+  if (has([1, 2, 3, 4, 5])) return "工作日";
+  if (has([0, 6])) return "周末";
+  return "周" + [1, 2, 3, 4, 5, 6, 0].filter(day => days.includes(day)).map(day => "日一二三四五六"[day]).join("、");
 }
 
 // ---------- 部署异常横幅（ok 时不占视觉空间，仅异常态提示并引导去部署页） ----------
@@ -128,6 +153,7 @@ const lastActionText = computed(() => {
     monitoring: "正在监控循环中",
     window_end: "监控中离开工作阶段，正常结束",
     max_rounds_reached: "达到最大检查轮次，未关机",
+    wake_failed: "开机闹钟准备失败，本次自动关机已暂停",
     poweroff: "全部检查通过，已发起关机"
   };
   return { text: map[action] || `未知状态：${action}`, time: status.value?.executor.status?.last_trigger };
@@ -217,7 +243,8 @@ const RESULT_CLASS: Record<DryRunCheckResult, string> = {
 
 onMounted(() => {
   void loadStatus();
-  timer = setInterval(() => void loadStatus(true), POLL_INTERVAL_MS);
+  void loadWake();
+  timer = setInterval(() => { void loadStatus(true); void loadWake(); }, POLL_INTERVAL_MS);
 });
 
 onBeforeUnmount(() => {
@@ -303,6 +330,26 @@ onBeforeUnmount(() => {
             {{ skipWorking ? "处理中..." : skipActive ? "取消跳过" : "今晚跳过" }}
           </button>
         </div>
+        <div class="status-item span-all wake-status-row">
+          <AlarmClock :size="15" class="status-icon" />
+          <span class="status-label">开机计划</span>
+          <div class="wake-status-content">
+            <span v-if="wakeError || wake?.config_error" class="text-warn" :title="wakeError || wake?.config_error || ''">读取失败，请到开机页检查</span>
+            <span v-else-if="!wake" class="text-muted">读取中…</span>
+            <span v-else-if="!wake.config.plans.length" class="text-muted">暂无</span>
+            <template v-else>
+              <ul class="wake-status-plans" aria-label="已保存的开机计划">
+                <li v-for="plan in wake.config.plans" :key="plan.id" :class="{ 'text-muted': !wake.config.enabled || !plan.enabled }">
+                  <time>{{ plan.time }}</time><span>{{ wakeDays(plan.weekdays) }}</span>
+                  <span v-if="plan.note" class="text-muted wake-status-note">{{ plan.note }}</span>
+                  <small v-if="!plan.enabled" class="text-muted">已停用</small>
+                </li>
+              </ul>
+              <small v-if="!wake.config.enabled" class="text-muted">定时开机已关闭</small>
+            </template>
+          </div>
+          <button class="wake-status-link" type="button" @click="emit('open-wake')">管理</button>
+        </div>
         <div v-if="lastActionText" class="status-item span-all">
           <History :size="15" class="status-icon" />
           <span class="status-label">最近动作</span>
@@ -314,7 +361,7 @@ onBeforeUnmount(() => {
       </div>
 
       <p v-if="status.executor.status?.config_fallback" class="badge-hint warn status-hint">
-        执行器读取配置时触发了默认值兜底（config_fallback），请到「设置」页检查并重新保存配置。
+        执行器读取配置时触发了默认值兜底（config_fallback），请到「关机」页检查并重新保存配置。
       </p>
 
       <p v-if="skipError" class="badge-hint warn status-hint">{{ skipError }}</p>
@@ -384,3 +431,17 @@ onBeforeUnmount(() => {
     </section>
   </template>
 </template>
+
+<style scoped>
+.wake-status-row { align-items: flex-start; }
+.wake-status-row > .status-icon { margin-top: 4px; }
+.wake-status-row > .status-label { padding-top: 2px; }
+.wake-status-content { flex: 1; min-width: 0; font-size: .85rem; line-height: 1.6; }
+.wake-status-plans { display: grid; gap: 4px; list-style: none; padding: 0; margin: 0; }
+.wake-status-plans li { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; }
+.wake-status-plans time { font-variant-numeric: tabular-nums; font-weight: 600; }
+.wake-status-plans small { font-size: 12px; }
+.wake-status-note { overflow-wrap: anywhere; }
+.wake-status-link { flex-shrink: 0; padding: 2px 0; border: 0; background: transparent; color: var(--brand-text); font: inherit; font-size: 12px; cursor: pointer; }
+.wake-status-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+</style>

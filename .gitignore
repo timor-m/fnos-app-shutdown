@@ -20,3 +20,7 @@ RELEASE_NOTES.md
 
 # 签名私钥（离线保管，绝不入库；§3.6 签名自更新信任锚）
 keys/
+
+# Python runtime tests
+__pycache__/
+*.pyc
